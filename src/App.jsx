@@ -22,6 +22,9 @@ export default function App() {
   });
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
   const listRef = useRef(null);
 
   useEffect(() => {
@@ -50,6 +53,8 @@ export default function App() {
   function toggleSidebar() {
     if (!showSidebar) loadSessions();
     setShowSidebar(!showSidebar);
+    setSearchResults(null);
+    setSearchQuery('');
   }
 
   function switchSession(id) {
@@ -57,6 +62,8 @@ export default function App() {
     setShowSidebar(false);
     setExpanded({});
     setEditingId(null);
+    setSearchResults(null);
+    setSearchQuery('');
   }
 
   function startNewChat() {
@@ -66,6 +73,7 @@ export default function App() {
     setExpanded({});
     setShowSidebar(false);
     setEditingId(null);
+    setSearchResults(null);
   }
 
   function startRename(id) {
@@ -83,7 +91,7 @@ export default function App() {
   async function deleteSession(id) {
     if (!confirm('确定删除这个对话吗？删了就没了')) return;
     try {
-      const { data: msgs } = await fetch(`${API}/api/messages?session_id=${id}`).then(r => r.json());
+      const msgs = await fetch(`${API}/api/messages?session_id=${id}`).then(r => r.json());
       if (Array.isArray(msgs)) {
         for (const m of msgs) {
           await fetch(`${API}/api/messages/${m.id}`, { method: 'DELETE' });
@@ -94,8 +102,20 @@ export default function App() {
     }
     setSessionNames(n => { const copy = { ...n }; delete copy[id]; return copy; });
     setSessions(s => s.filter(x => x.session_id !== id));
-    if (sessionId === id) {
-      startNewChat();
+    if (sessionId === id) startNewChat();
+  }
+
+  async function doSearch() {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const r = await fetch(`${API}/api/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      const data = await r.json();
+      setSearchResults(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -168,7 +188,7 @@ export default function App() {
 
       {showSidebar && (
         <div
-          onClick={() => { setShowSidebar(false); setEditingId(null); }}
+          onClick={() => { setShowSidebar(false); setEditingId(null); setSearchResults(null); }}
           style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
@@ -212,67 +232,136 @@ export default function App() {
             }}
           >+ 新对话</div>
         </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-          {sessions.map((s) => (
-            <div
-              key={s.session_id}
+
+        {/* 搜索框 */}
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(200,190,220,0.15)' }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && doSearch()}
+              placeholder="搜索聊天记录..."
               style={{
-                padding: '10px 16px',
-                background: s.session_id === sessionId ? 'rgba(180,165,215,0.2)' : 'transparent',
-                borderLeft: s.session_id === sessionId ? '3px solid rgba(160,140,200,0.7)' : '3px solid transparent',
+                flex: 1, padding: '6px 10px', borderRadius: 10,
+                border: '1px solid rgba(200,190,220,0.3)',
+                fontSize: 13, outline: 'none',
+                background: 'rgba(255,255,255,0.7)',
               }}
-            >
-              {editingId === s.session_id ? (
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <input
-                    value={editName}
-                    onChange={e => setEditName(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && saveRename(s.session_id)}
-                    style={{
-                      flex: 1, padding: '4px 8px', borderRadius: 8,
-                      border: '1px solid rgba(200,190,220,0.4)',
-                      fontSize: 13, outline: 'none',
-                    }}
-                    autoFocus
-                  />
-                  <div
-                    onClick={() => saveRename(s.session_id)}
-                    style={{ cursor: 'pointer', fontSize: 13, color: '#7b6a8a', padding: '4px' }}
-                  >✓</div>
+            />
+            <div
+              onClick={doSearch}
+              style={{
+                padding: '6px 10px', borderRadius: 10,
+                background: 'rgba(160,140,200,0.5)',
+                color: '#fff', fontSize: 13, cursor: 'pointer',
+              }}
+            >搜</div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+          {/* 搜索结果 */}
+          {searchResults !== null ? (
+            <div>
+              <div style={{
+                padding: '8px 16px', fontSize: 12, color: '#a898b8',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                <span>找到 {searchResults.length} 条结果</span>
+                <span
+                  onClick={() => { setSearchResults(null); setSearchQuery(''); }}
+                  style={{ cursor: 'pointer', color: '#9a8ab5' }}
+                >清除</span>
+              </div>
+              {searchResults.map(r => (
+                <div
+                  key={r.id}
+                  onClick={() => switchSession(r.session_id)}
+                  style={{
+                    padding: '8px 16px', cursor: 'pointer',
+                    borderBottom: '1px solid rgba(200,190,220,0.1)',
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: '#a898b8', marginBottom: 2 }}>
+                    {displayName(r.session_id)} · {formatTime(r.created_at)}
+                  </div>
+                  <div style={{
+                    fontSize: 13, color: r.role === 'user' ? '#5b4a6a' : '#3a3a3a',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {r.role === 'user' ? '你：' : '小克：'}{r.content}
+                  </div>
                 </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div
-                    onClick={() => switchSession(s.session_id)}
-                    style={{ flex: 1, cursor: 'pointer' }}
-                  >
-                    <div style={{
-                      fontSize: 14, color: '#5b4a6a',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {displayName(s.session_id)}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#a898b8', marginTop: 2 }}>
-                      {formatTime(s.last_at)}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
-                    <div
-                      onClick={() => startRename(s.session_id)}
-                      style={{ cursor: 'pointer', fontSize: 14, color: '#a898b8' }}
-                      title="改名"
-                    >✏</div>
-                    <div
-                      onClick={() => deleteSession(s.session_id)}
-                      style={{ cursor: 'pointer', fontSize: 14, color: '#d4a0a0' }}
-                      title="删除"
-                    >✕</div>
-                  </div>
+              ))}
+              {searchResults.length === 0 && (
+                <div style={{ padding: 16, color: '#a898b8', fontSize: 13, textAlign: 'center' }}>
+                  没找到相关内容
                 </div>
               )}
             </div>
-          ))}
-          {sessions.length === 0 && (
+          ) : (
+            /* 对话列表 */
+            sessions.map((s) => (
+              <div
+                key={s.session_id}
+                style={{
+                  padding: '10px 16px',
+                  background: s.session_id === sessionId ? 'rgba(180,165,215,0.2)' : 'transparent',
+                  borderLeft: s.session_id === sessionId ? '3px solid rgba(160,140,200,0.7)' : '3px solid transparent',
+                }}
+              >
+                {editingId === s.session_id ? (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <input
+                      value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && saveRename(s.session_id)}
+                      style={{
+                        flex: 1, padding: '4px 8px', borderRadius: 8,
+                        border: '1px solid rgba(200,190,220,0.4)',
+                        fontSize: 13, outline: 'none',
+                      }}
+                      autoFocus
+                    />
+                    <div
+                      onClick={() => saveRename(s.session_id)}
+                      style={{ cursor: 'pointer', fontSize: 13, color: '#7b6a8a', padding: '4px' }}
+                    >✓</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div
+                      onClick={() => switchSession(s.session_id)}
+                      style={{ flex: 1, cursor: 'pointer' }}
+                    >
+                      <div style={{
+                        fontSize: 14, color: '#5b4a6a',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {displayName(s.session_id)}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#a898b8', marginTop: 2 }}>
+                        {formatTime(s.last_at)}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
+                      <div
+                        onClick={() => startRename(s.session_id)}
+                        style={{ cursor: 'pointer', fontSize: 14, color: '#a898b8' }}
+                        title="改名"
+                      >✏</div>
+                      <div
+                        onClick={() => deleteSession(s.session_id)}
+                        style={{ cursor: 'pointer', fontSize: 14, color: '#d4a0a0' }}
+                        title="删除"
+                      >✕</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+          {!searchResults && sessions.length === 0 && (
             <div style={{ padding: 16, color: '#a898b8', fontSize: 13, textAlign: 'center' }}>
               还没有对话记录
             </div>
