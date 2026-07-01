@@ -65,7 +65,7 @@ export default function App() {
         backgroundImage: 'url(/bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
-        opacity: 0.25,
+        opacity: 0.5,
         zIndex: 0,
       }} />
 
@@ -76,7 +76,7 @@ export default function App() {
         left: 0,
         right: 0,
         bottom: 0,
-        background: 'linear-gradient(135deg, rgba(245,240,255,0.85), rgba(240,248,255,0.85))',
+        background: 'linear-gradient(135deg, rgba(245,240,255,0.55), rgba(240,248,255,0.55))',
         zIndex: 1,
       }} />
 
@@ -119,10 +119,10 @@ export default function App() {
               padding: '10px 14px',
               borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
               background: m.role === 'user'
-                ? 'rgba(180,165,215,0.45)'
+                ? 'rgba(180,165,215,0.25)'
                 : m.role === 'error'
                 ? 'rgba(255,180,180,0.5)'
-                : 'rgba(255,255,255,0.45)',
+                : 'rgba(255,255,255,0.25)',
               backdropFilter: 'blur(10px)',
               color: m.role === 'user' ? '#4a3a5a' : '#3a3a3a',
               fontSize: 15,
@@ -171,7 +171,7 @@ export default function App() {
             <div style={{
               padding: '10px 18px',
               borderRadius: '18px 18px 18px 4px',
-              background: 'rgba(255,255,255,0.45)',
+              background: 'rgba(255,255,255,0.25)',
               backdropFilter: 'blur(10px)',
               color: '#a898b8',
               fontSize: 14,
