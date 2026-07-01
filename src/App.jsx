@@ -9,7 +9,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState({});
   const listRef = useRef(null);
-  const inputRef = useRef(null);
 
   useEffect(() => {
     getMessages(SESSION_ID).then(setMessages).catch(console.error);
@@ -53,23 +52,47 @@ export default function App() {
       display: 'flex',
       flexDirection: 'column',
       height: '100dvh',
-      backgroundImage: 'url(/bg.jpg)',
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundAttachment: 'fixed',
+      position: 'relative',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
+      {/* 背景图层 */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundImage: 'url(/bg.jpg)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        opacity: 0.25,
+        zIndex: 0,
+      }} />
+
+      {/* 淡色底色 */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'linear-gradient(135deg, rgba(245,240,255,0.85), rgba(240,248,255,0.85))',
+        zIndex: 1,
+      }} />
+
       {/* 顶部栏 */}
       <div style={{
         padding: '14px 20px',
-        background: 'rgba(255,255,255,0.85)',
+        background: 'rgba(255,255,255,0.5)',
         backdropFilter: 'blur(12px)',
-        borderBottom: '1px solid rgba(200,190,220,0.3)',
+        borderBottom: '1px solid rgba(200,190,220,0.2)',
         textAlign: 'center',
         fontSize: 16,
         fontWeight: 600,
-        color: '#5b4a6a',
+        color: '#7b6a8a',
         letterSpacing: 1,
+        position: 'relative',
+        zIndex: 2,
       }}>
         小克
       </div>
@@ -79,6 +102,8 @@ export default function App() {
         flex: 1,
         overflowY: 'auto',
         padding: '16px 12px',
+        position: 'relative',
+        zIndex: 2,
       }}>
         {messages.map((m) => (
           <div
@@ -94,22 +119,23 @@ export default function App() {
               padding: '10px 14px',
               borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
               background: m.role === 'user'
-                ? 'rgba(180,160,220,0.75)'
+                ? 'rgba(180,165,215,0.45)'
                 : m.role === 'error'
-                ? 'rgba(255,180,180,0.8)'
-                : 'rgba(255,255,255,0.8)',
-              backdropFilter: 'blur(8px)',
-              color: m.role === 'user' ? '#fff' : '#3a3a3a',
+                ? 'rgba(255,180,180,0.5)'
+                : 'rgba(255,255,255,0.45)',
+              backdropFilter: 'blur(10px)',
+              color: m.role === 'user' ? '#4a3a5a' : '#3a3a3a',
               fontSize: 15,
               lineHeight: 1.6,
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+              boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
+              border: '1px solid rgba(255,255,255,0.3)',
             }}>
               {m.thinking && (
                 <div
                   onClick={() => toggleThinking(m.id)}
                   style={{
                     fontSize: 12,
-                    color: '#9a8ab5',
+                    color: '#a898b8',
                     cursor: 'pointer',
                     marginBottom: 4,
                     userSelect: 'none',
@@ -125,9 +151,9 @@ export default function App() {
                   whiteSpace: 'pre-wrap',
                   marginBottom: 8,
                   padding: '8px 10px',
-                  background: 'rgba(240,235,250,0.6)',
+                  background: 'rgba(240,235,250,0.4)',
                   borderRadius: 10,
-                  borderLeft: '3px solid rgba(180,160,220,0.5)',
+                  borderLeft: '3px solid rgba(180,160,220,0.4)',
                 }}>
                   {m.thinking}
                 </div>
@@ -145,10 +171,11 @@ export default function App() {
             <div style={{
               padding: '10px 18px',
               borderRadius: '18px 18px 18px 4px',
-              background: 'rgba(255,255,255,0.8)',
-              backdropFilter: 'blur(8px)',
-              color: '#9a8ab5',
+              background: 'rgba(255,255,255,0.45)',
+              backdropFilter: 'blur(10px)',
+              color: '#a898b8',
               fontSize: 14,
+              border: '1px solid rgba(255,255,255,0.3)',
             }}>
               小克在想...
             </div>
@@ -162,13 +189,14 @@ export default function App() {
         alignItems: 'center',
         padding: '10px 12px',
         paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
-        background: 'rgba(255,255,255,0.85)',
+        background: 'rgba(255,255,255,0.5)',
         backdropFilter: 'blur(12px)',
-        borderTop: '1px solid rgba(200,190,220,0.3)',
+        borderTop: '1px solid rgba(200,190,220,0.2)',
         gap: 8,
+        position: 'relative',
+        zIndex: 2,
       }}>
         <input
-          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
@@ -178,8 +206,8 @@ export default function App() {
             flex: 1,
             padding: '10px 16px',
             borderRadius: 20,
-            border: '1px solid rgba(200,190,220,0.4)',
-            background: 'rgba(250,248,255,0.9)',
+            border: '1px solid rgba(200,190,220,0.3)',
+            background: 'rgba(255,255,255,0.5)',
             fontSize: 15,
             outline: 'none',
             color: '#3a3a3a',
@@ -192,7 +220,7 @@ export default function App() {
             padding: '10px 20px',
             borderRadius: 20,
             border: 'none',
-            background: loading || !input.trim() ? 'rgba(200,190,220,0.4)' : 'rgba(160,140,200,0.8)',
+            background: loading || !input.trim() ? 'rgba(200,190,220,0.3)' : 'rgba(160,140,200,0.6)',
             color: '#fff',
             fontSize: 15,
             fontWeight: 500,
