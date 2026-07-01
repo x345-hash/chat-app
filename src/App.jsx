@@ -1,9 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { getMessages, chat } from './lib/api';
 
-const SESSION_ID = 'default';
+function newId() {
+  return 'chat-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
 
 export default function App() {
+  const [sessionId, setSessionId] = useState(() => {
+    return localStorage.getItem('current_session') || newId();
+  });
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -11,12 +16,20 @@ export default function App() {
   const listRef = useRef(null);
 
   useEffect(() => {
-    getMessages(SESSION_ID).then(setMessages).catch(console.error);
-  }, []);
+    localStorage.setItem('current_session', sessionId);
+    getMessages(sessionId).then(setMessages).catch(console.error);
+  }, [sessionId]);
 
   useEffect(() => {
     listRef.current?.scrollTo(0, listRef.current.scrollHeight);
   }, [messages]);
+
+  function startNewChat() {
+    const id = newId();
+    setSessionId(id);
+    setMessages([]);
+    setExpanded({});
+  }
 
   async function send() {
     const text = input.trim();
@@ -26,7 +39,7 @@ export default function App() {
     setInput('');
     setLoading(true);
     try {
-      const result = await chat({ session_id: SESSION_ID, content: text });
+      const result = await chat({ session_id: sessionId, content: text });
       setMessages((m) => [
         ...m.filter((x) => x.id !== tempUserMsg.id),
         result.user_message,
@@ -55,7 +68,6 @@ export default function App() {
       position: 'relative',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
-      {/* 背景图层 */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -69,7 +81,6 @@ export default function App() {
         zIndex: 0,
       }} />
 
-      {/* 淡色底色 */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -80,24 +91,37 @@ export default function App() {
         zIndex: 1,
       }} />
 
-      {/* 顶部栏 */}
       <div style={{
         padding: '14px 20px',
         background: 'rgba(255,255,255,0.5)',
         backdropFilter: 'blur(12px)',
         borderBottom: '1px solid rgba(200,190,220,0.2)',
-        textAlign: 'center',
-        fontSize: 16,
-        fontWeight: 600,
-        color: '#7b6a8a',
-        letterSpacing: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         position: 'relative',
         zIndex: 2,
       }}>
-        小克
+        <div
+          onClick={startNewChat}
+          style={{
+            position: 'absolute',
+            left: 16,
+            fontSize: 20,
+            cursor: 'pointer',
+            color: '#9a8ab5',
+            userSelect: 'none',
+          }}
+          title="新对话"
+        >+</div>
+        <div style={{
+          fontSize: 16,
+          fontWeight: 600,
+          color: '#7b6a8a',
+          letterSpacing: 1,
+        }}>小克</div>
       </div>
 
-      {/* 消息区域 */}
       <div ref={listRef} style={{
         flex: 1,
         overflowY: 'auto',
@@ -183,7 +207,6 @@ export default function App() {
         )}
       </div>
 
-      {/* 输入区域 */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
