@@ -1,18 +1,22 @@
 import { useEffect, useState, useRef } from 'react';
 import { getMessages, chat } from './lib/api';
 
+const API = import.meta.env.VITE_API_BASE;
+
 function newId() {
   return 'chat-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
 export default function App() {
   const [sessionId, setSessionId] = useState(() => {
-    return localStorage.getItem('current_session') || newId();
+    return localStorage.getItem('current_session') || 'default';
   });
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState({});
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [sessions, setSessions] = useState([]);
   const listRef = useRef(null);
 
   useEffect(() => {
@@ -24,11 +28,33 @@ export default function App() {
     listRef.current?.scrollTo(0, listRef.current.scrollHeight);
   }, [messages]);
 
+  async function loadSessions() {
+    try {
+      const r = await fetch(`${API}/api/sessions`);
+      const data = await r.json();
+      setSessions(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function toggleSidebar() {
+    if (!showSidebar) loadSessions();
+    setShowSidebar(!showSidebar);
+  }
+
+  function switchSession(id) {
+    setSessionId(id);
+    setShowSidebar(false);
+    setExpanded({});
+  }
+
   function startNewChat() {
     const id = newId();
     setSessionId(id);
     setMessages([]);
     setExpanded({});
+    setShowSidebar(false);
   }
 
   async function send() {
@@ -60,6 +86,13 @@ export default function App() {
     setExpanded((e) => ({ ...e, [id]: !e[id] }));
   }
 
+  function formatTime(t) {
+    try {
+      const d = new Date(t);
+      return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return t; }
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -70,10 +103,7 @@ export default function App() {
     }}>
       <div style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        top: 0, left: 0, right: 0, bottom: 0,
         backgroundImage: 'url(/bg.jpg)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
@@ -83,14 +113,94 @@ export default function App() {
 
       <div style={{
         position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        top: 0, left: 0, right: 0, bottom: 0,
         background: 'linear-gradient(135deg, rgba(245,240,255,0.55), rgba(240,248,255,0.55))',
         zIndex: 1,
       }} />
 
+      {/* 侧边栏遮罩 */}
+      {showSidebar && (
+        <div
+          onClick={() => setShowSidebar(false)}
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.3)',
+            zIndex: 10,
+          }}
+        />
+      )}
+
+      {/* 侧边栏 */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: showSidebar ? 0 : -280,
+        width: 270,
+        height: '100%',
+        background: 'rgba(250,248,255,0.95)',
+        backdropFilter: 'blur(16px)',
+        zIndex: 11,
+        transition: 'left 0.25s ease',
+        display: 'flex',
+        flexDirection: 'column',
+        borderRight: '1px solid rgba(200,190,220,0.3)',
+      }}>
+        <div style={{
+          padding: '16px',
+          borderBottom: '1px solid rgba(200,190,220,0.2)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#7b6a8a' }}>历史对话</span>
+          <div
+            onClick={startNewChat}
+            style={{
+              padding: '4px 12px',
+              borderRadius: 12,
+              background: 'rgba(160,140,200,0.6)',
+              color: '#fff',
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >+ 新对话</div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+          {sessions.map((s) => (
+            <div
+              key={s.session_id}
+              onClick={() => switchSession(s.session_id)}
+              style={{
+                padding: '12px 16px',
+                cursor: 'pointer',
+                background: s.session_id === sessionId ? 'rgba(180,165,215,0.2)' : 'transparent',
+                borderLeft: s.session_id === sessionId ? '3px solid rgba(160,140,200,0.7)' : '3px solid transparent',
+              }}
+            >
+              <div style={{
+                fontSize: 14,
+                color: '#5b4a6a',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {s.session_id === 'default' ? '默认对话' : s.session_id}
+              </div>
+              <div style={{ fontSize: 11, color: '#a898b8', marginTop: 2 }}>
+                {formatTime(s.last_at)}
+              </div>
+            </div>
+          ))}
+          {sessions.length === 0 && (
+            <div style={{ padding: 16, color: '#a898b8', fontSize: 13, textAlign: 'center' }}>
+              还没有对话记录
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 顶部栏 */}
       <div style={{
         padding: '14px 20px',
         background: 'rgba(255,255,255,0.5)',
@@ -103,10 +213,21 @@ export default function App() {
         zIndex: 2,
       }}>
         <div
-          onClick={startNewChat}
+          onClick={toggleSidebar}
           style={{
             position: 'absolute',
             left: 16,
+            fontSize: 18,
+            cursor: 'pointer',
+            color: '#9a8ab5',
+            userSelect: 'none',
+          }}
+        >☰</div>
+        <div
+          onClick={startNewChat}
+          style={{
+            position: 'absolute',
+            right: 16,
             fontSize: 20,
             cursor: 'pointer',
             color: '#9a8ab5',
@@ -122,6 +243,7 @@ export default function App() {
         }}>小克</div>
       </div>
 
+      {/* 消息区域 */}
       <div ref={listRef} style={{
         flex: 1,
         overflowY: 'auto',
@@ -207,6 +329,7 @@ export default function App() {
         )}
       </div>
 
+      {/* 输入区域 */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
