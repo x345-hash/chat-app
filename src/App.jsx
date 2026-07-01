@@ -9,6 +9,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState({});
   const listRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     getMessages(SESSION_ID).then(setMessages).catch(console.error);
@@ -48,40 +49,86 @@ export default function App() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
-      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100dvh',
+      backgroundImage: 'url(/bg.jpg)',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    }}>
+      {/* 顶部栏 */}
+      <div style={{
+        padding: '14px 20px',
+        background: 'rgba(255,255,255,0.85)',
+        backdropFilter: 'blur(12px)',
+        borderBottom: '1px solid rgba(200,190,220,0.3)',
+        textAlign: 'center',
+        fontSize: 16,
+        fontWeight: 600,
+        color: '#5b4a6a',
+        letterSpacing: 1,
+      }}>
+        小克
+      </div>
+
+      {/* 消息区域 */}
+      <div ref={listRef} style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '16px 12px',
+      }}>
         {messages.map((m) => (
           <div
             key={m.id}
             style={{
               display: 'flex',
               justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
-              marginBottom: 8,
+              marginBottom: 10,
             }}
           >
-            <div
-              style={{
-                maxWidth: '70%',
-                padding: 12,
-                borderRadius: 12,
-                background:
-                  m.role === 'user'
-                    ? '#cce5ff'
-                    : m.role === 'error'
-                    ? '#ffcccc'
-                    : '#eee',
-              }}
-            >
+            <div style={{
+              maxWidth: '75%',
+              padding: '10px 14px',
+              borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+              background: m.role === 'user'
+                ? 'rgba(180,160,220,0.75)'
+                : m.role === 'error'
+                ? 'rgba(255,180,180,0.8)'
+                : 'rgba(255,255,255,0.8)',
+              backdropFilter: 'blur(8px)',
+              color: m.role === 'user' ? '#fff' : '#3a3a3a',
+              fontSize: 15,
+              lineHeight: 1.6,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+            }}>
               {m.thinking && (
-                <button
+                <div
                   onClick={() => toggleThinking(m.id)}
-                  style={{ fontSize: 12, marginBottom: 4 }}
+                  style={{
+                    fontSize: 12,
+                    color: '#9a8ab5',
+                    cursor: 'pointer',
+                    marginBottom: 4,
+                    userSelect: 'none',
+                  }}
                 >
-                  {expanded[m.id] ? '收起' : '思考'}
-                </button>
+                  {expanded[m.id] ? '▼ 收起思考' : '▶ 查看思考'}
+                </div>
               )}
               {expanded[m.id] && m.thinking && (
-                <div style={{ fontSize: 12, color: '#666', whiteSpace: 'pre-wrap', marginBottom: 8 }}>
+                <div style={{
+                  fontSize: 13,
+                  color: '#8a7a9a',
+                  whiteSpace: 'pre-wrap',
+                  marginBottom: 8,
+                  padding: '8px 10px',
+                  background: 'rgba(240,235,250,0.6)',
+                  borderRadius: 10,
+                  borderLeft: '3px solid rgba(180,160,220,0.5)',
+                }}>
                   {m.thinking}
                 </div>
               )}
@@ -89,18 +136,69 @@ export default function App() {
             </div>
           </div>
         ))}
-        {loading && <div style={{ color: '#888' }}>AI 在思考...</div>}
+        {loading && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'flex-start',
+            marginBottom: 10,
+          }}>
+            <div style={{
+              padding: '10px 18px',
+              borderRadius: '18px 18px 18px 4px',
+              background: 'rgba(255,255,255,0.8)',
+              backdropFilter: 'blur(8px)',
+              color: '#9a8ab5',
+              fontSize: 14,
+            }}>
+              小克在想...
+            </div>
+          </div>
+        )}
       </div>
-      <div style={{ display: 'flex', padding: 12, borderTop: '1px solid #ddd' }}>
+
+      {/* 输入区域 */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        padding: '10px 12px',
+        paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
+        background: 'rgba(255,255,255,0.85)',
+        backdropFilter: 'blur(12px)',
+        borderTop: '1px solid rgba(200,190,220,0.3)',
+        gap: 8,
+      }}>
         <input
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder="说点什么..."
+          placeholder="跟小克说点什么..."
           disabled={loading}
-          style={{ flex: 1, padding: 8 }}
+          style={{
+            flex: 1,
+            padding: '10px 16px',
+            borderRadius: 20,
+            border: '1px solid rgba(200,190,220,0.4)',
+            background: 'rgba(250,248,255,0.9)',
+            fontSize: 15,
+            outline: 'none',
+            color: '#3a3a3a',
+          }}
         />
-        <button onClick={send} disabled={loading || !input.trim()} style={{ marginLeft: 8 }}>
+        <button
+          onClick={send}
+          disabled={loading || !input.trim()}
+          style={{
+            padding: '10px 20px',
+            borderRadius: 20,
+            border: 'none',
+            background: loading || !input.trim() ? 'rgba(200,190,220,0.4)' : 'rgba(160,140,200,0.8)',
+            color: '#fff',
+            fontSize: 15,
+            fontWeight: 500,
+            cursor: loading || !input.trim() ? 'default' : 'pointer',
+          }}
+        >
           发送
         </button>
       </div>
