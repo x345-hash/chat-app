@@ -17,6 +17,11 @@ export default function App() {
   const [expanded, setExpanded] = useState({});
   const [showSidebar, setShowSidebar] = useState(false);
   const [sessions, setSessions] = useState([]);
+  const [sessionNames, setSessionNames] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('session_names') || '{}'); } catch { return {}; }
+  });
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
   const listRef = useRef(null);
 
   useEffect(() => {
@@ -27,6 +32,10 @@ export default function App() {
   useEffect(() => {
     listRef.current?.scrollTo(0, listRef.current.scrollHeight);
   }, [messages]);
+
+  useEffect(() => {
+    localStorage.setItem('session_names', JSON.stringify(sessionNames));
+  }, [sessionNames]);
 
   async function loadSessions() {
     try {
@@ -47,6 +56,7 @@ export default function App() {
     setSessionId(id);
     setShowSidebar(false);
     setExpanded({});
+    setEditingId(null);
   }
 
   function startNewChat() {
@@ -55,6 +65,38 @@ export default function App() {
     setMessages([]);
     setExpanded({});
     setShowSidebar(false);
+    setEditingId(null);
+  }
+
+  function startRename(id) {
+    setEditingId(id);
+    setEditName(sessionNames[id] || '');
+  }
+
+  function saveRename(id) {
+    if (editName.trim()) {
+      setSessionNames(n => ({ ...n, [id]: editName.trim() }));
+    }
+    setEditingId(null);
+  }
+
+  async function deleteSession(id) {
+    if (!confirm('确定删除这个对话吗？删了就没了')) return;
+    try {
+      const { data: msgs } = await fetch(`${API}/api/messages?session_id=${id}`).then(r => r.json());
+      if (Array.isArray(msgs)) {
+        for (const m of msgs) {
+          await fetch(`${API}/api/messages/${m.id}`, { method: 'DELETE' });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setSessionNames(n => { const copy = { ...n }; delete copy[id]; return copy; });
+    setSessions(s => s.filter(x => x.session_id !== id));
+    if (sessionId === id) {
+      startNewChat();
+    }
   }
 
   async function send() {
@@ -93,6 +135,12 @@ export default function App() {
     } catch { return t; }
   }
 
+  function displayName(id) {
+    if (sessionNames[id]) return sessionNames[id];
+    if (id === 'default') return '默认对话';
+    return id;
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -118,10 +166,9 @@ export default function App() {
         zIndex: 1,
       }} />
 
-      {/* 侧边栏遮罩 */}
       {showSidebar && (
         <div
-          onClick={() => setShowSidebar(false)}
+          onClick={() => { setShowSidebar(false); setEditingId(null); }}
           style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
@@ -131,12 +178,11 @@ export default function App() {
         />
       )}
 
-      {/* 侧边栏 */}
       <div style={{
         position: 'fixed',
         top: 0,
-        left: showSidebar ? 0 : -280,
-        width: 270,
+        left: showSidebar ? 0 : -300,
+        width: 290,
         height: '100%',
         background: 'rgba(250,248,255,0.95)',
         backdropFilter: 'blur(16px)',
@@ -170,26 +216,60 @@ export default function App() {
           {sessions.map((s) => (
             <div
               key={s.session_id}
-              onClick={() => switchSession(s.session_id)}
               style={{
-                padding: '12px 16px',
-                cursor: 'pointer',
+                padding: '10px 16px',
                 background: s.session_id === sessionId ? 'rgba(180,165,215,0.2)' : 'transparent',
                 borderLeft: s.session_id === sessionId ? '3px solid rgba(160,140,200,0.7)' : '3px solid transparent',
               }}
             >
-              <div style={{
-                fontSize: 14,
-                color: '#5b4a6a',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {s.session_id === 'default' ? '默认对话' : s.session_id}
-              </div>
-              <div style={{ fontSize: 11, color: '#a898b8', marginTop: 2 }}>
-                {formatTime(s.last_at)}
-              </div>
+              {editingId === s.session_id ? (
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <input
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveRename(s.session_id)}
+                    style={{
+                      flex: 1, padding: '4px 8px', borderRadius: 8,
+                      border: '1px solid rgba(200,190,220,0.4)',
+                      fontSize: 13, outline: 'none',
+                    }}
+                    autoFocus
+                  />
+                  <div
+                    onClick={() => saveRename(s.session_id)}
+                    style={{ cursor: 'pointer', fontSize: 13, color: '#7b6a8a', padding: '4px' }}
+                  >✓</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div
+                    onClick={() => switchSession(s.session_id)}
+                    style={{ flex: 1, cursor: 'pointer' }}
+                  >
+                    <div style={{
+                      fontSize: 14, color: '#5b4a6a',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {displayName(s.session_id)}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#a898b8', marginTop: 2 }}>
+                      {formatTime(s.last_at)}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
+                    <div
+                      onClick={() => startRename(s.session_id)}
+                      style={{ cursor: 'pointer', fontSize: 14, color: '#a898b8' }}
+                      title="改名"
+                    >✏</div>
+                    <div
+                      onClick={() => deleteSession(s.session_id)}
+                      style={{ cursor: 'pointer', fontSize: 14, color: '#d4a0a0' }}
+                      title="删除"
+                    >✕</div>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           {sessions.length === 0 && (
@@ -200,7 +280,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* 顶部栏 */}
       <div style={{
         padding: '14px 20px',
         background: 'rgba(255,255,255,0.5)',
@@ -243,7 +322,6 @@ export default function App() {
         }}>小克</div>
       </div>
 
-      {/* 消息区域 */}
       <div ref={listRef} style={{
         flex: 1,
         overflowY: 'auto',
@@ -329,7 +407,6 @@ export default function App() {
         )}
       </div>
 
-      {/* 输入区域 */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
