@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 const API = import.meta.env.VITE_API_BASE;
 
@@ -6,7 +6,7 @@ function newId() {
   return 'chat-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-// 甯﹀瘑鐮佺殑 fetch 灏佽
+// 带密码的 fetch 封装
 function authedFetch(url, options = {}) {
   const pwd = localStorage.getItem('app_password') || '';
   const headers = {
@@ -19,7 +19,8 @@ function authedFetch(url, options = {}) {
   return fetch(url, { ...options, headers });
 }
 
-// 鏍煎紡鍖栨秷鎭椂闂?function formatMsgTime(t) {
+// 格式化消息时间
+function formatMsgTime(t) {
   try {
     const d = new Date(t);
     const now = new Date();
@@ -30,13 +31,14 @@ function authedFetch(url, options = {}) {
 
     const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
     if (isToday) return time;
-    if (isYesterday) return `鏄ㄥぉ ${time}`;
+    if (isYesterday) return `昨天 ${time}`;
     return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + ' ' + time;
   } catch { return ''; }
 }
 
 export default function App() {
-  // 瀵嗙爜鐘舵€?  const [authed, setAuthed] = useState(() => {
+  // 密码状态
+  const [authed, setAuthed] = useState(() => {
     return !!localStorage.getItem('app_password');
   });
   const [pwdInput, setPwdInput] = useState('');
@@ -62,7 +64,7 @@ export default function App() {
   const [greetingMsg, setGreetingMsg] = useState(null);
   const listRef = useRef(null);
 
-  // 楠岃瘉瀵嗙爜
+  // 验证密码
   async function checkPassword() {
     setPwdError('');
     localStorage.setItem('app_password', pwdInput);
@@ -70,17 +72,17 @@ export default function App() {
       const r = await authedFetch(`${API}/api/sessions`);
       if (r.status === 401) {
         localStorage.removeItem('app_password');
-        setPwdError('瀵嗙爜涓嶅鍝?);
+        setPwdError('密码不对哦');
         return;
       }
       setAuthed(true);
     } catch {
       localStorage.removeItem('app_password');
-      setPwdError('杩炴帴澶辫触锛屾鏌ョ綉缁?);
+      setPwdError('连接失败，检查网络');
     }
   }
 
-  // 鍔犺浇娑堟伅
+  // 加载消息
   async function loadMessages(sid) {
     try {
       const r = await authedFetch(`${API}/api/messages?session_id=${sid}`);
@@ -96,7 +98,8 @@ export default function App() {
     loadMessages(sessionId);
   }, [sessionId, authed]);
 
-  // 鎵撳紑app鏃惰幏鍙栨櫤鑳介棶鍊?  useEffect(() => {
+  // 打开app时获取智能问候
+  useEffect(() => {
     if (!authed) return;
     async function fetchGreeting() {
       try {
@@ -106,7 +109,7 @@ export default function App() {
         const showWeather = weatherShownDate !== today;
         if (!showWeather) return;
 
-        // 灏濊瘯鑾峰彇鍩庡競
+        // 尝试获取城市
         let city = 'Changsha';
         try {
           const geoRes = await fetch('https://ipapi.co/json/');
@@ -196,7 +199,7 @@ export default function App() {
   }
 
   async function deleteSession(id) {
-    if (!confirm('纭畾鍒犻櫎杩欎釜瀵硅瘽鍚楋紵鍒犱簡灏辨病浜?)) return;
+    if (!confirm('确定删除这个对话吗？删了就没了')) return;
     try {
       const r = await authedFetch(`${API}/api/messages?session_id=${id}`);
       const msgs = await r.json();
@@ -266,11 +269,11 @@ export default function App() {
 
   function displayName(id) {
     if (sessionNames[id]) return sessionNames[id];
-    if (id === 'default') return '榛樿瀵硅瘽';
+    if (id === 'default') return '默认对话';
     return id;
   }
 
-  // ===== 瀵嗙爜鐧诲綍椤?=====
+  // ===== 密码登录页 =====
   if (!authed) {
     return (
       <div style={{
@@ -309,14 +312,14 @@ export default function App() {
           boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
           border: '1px solid rgba(255,255,255,0.4)',
         }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>馃敀</div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#7b6a8a', marginBottom: 24 }}>灏忓厠鐨勫</div>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🔒</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#7b6a8a', marginBottom: 24 }}>小克的家</div>
           <input
             type="password"
             value={pwdInput}
             onChange={e => setPwdInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && checkPassword()}
-            placeholder="杈撳叆瀵嗙爜"
+            placeholder="输入密码"
             style={{
               width: '100%',
               padding: '12px 16px',
@@ -345,13 +348,13 @@ export default function App() {
               fontWeight: 500,
               cursor: 'pointer',
             }}
-          >杩涘叆</div>
+          >进入</div>
         </div>
       </div>
     );
   }
 
-  // ===== 涓荤晫闈?=====
+  // ===== 主界面 =====
   return (
     <div style={{
       display: 'flex',
@@ -389,7 +392,7 @@ export default function App() {
         />
       )}
 
-      {/* 渚ц竟鏍?*/}
+      {/* 侧边栏 */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -411,7 +414,7 @@ export default function App() {
           justifyContent: 'space-between',
           alignItems: 'center',
         }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: '#7b6a8a' }}>鍘嗗彶瀵硅瘽</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#7b6a8a' }}>历史对话</span>
           <div
             onClick={startNewChat}
             style={{
@@ -422,7 +425,7 @@ export default function App() {
               fontSize: 13,
               cursor: 'pointer',
             }}
-          >+ 鏂板璇?/div>
+          >+ 新对话</div>
         </div>
 
         <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(200,190,220,0.15)' }}>
@@ -431,7 +434,7 @@ export default function App() {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && doSearch()}
-              placeholder="鎼滅储鑱婂ぉ璁板綍..."
+              placeholder="搜索聊天记录..."
               style={{
                 flex: 1, padding: '6px 10px', borderRadius: 10,
                 border: '1px solid rgba(200,190,220,0.3)',
@@ -447,7 +450,7 @@ export default function App() {
                 color: '#fff', fontSize: 13, cursor: 'pointer',
                 display: 'flex', alignItems: 'center',
               }}
-            >鎼?/div>
+            >搜</div>
           </div>
         </div>
 
@@ -458,11 +461,11 @@ export default function App() {
                 padding: '8px 16px', fontSize: 12, color: '#a898b8',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               }}>
-                <span>鎵惧埌 {searchResults.length} 鏉＄粨鏋?/span>
+                <span>找到 {searchResults.length} 条结果</span>
                 <span
                   onClick={() => { setSearchResults(null); setSearchQuery(''); }}
                   style={{ cursor: 'pointer', color: '#9a8ab5' }}
-                >娓呴櫎</span>
+                >清除</span>
               </div>
               {searchResults.map(r => (
                 <div
@@ -474,19 +477,20 @@ export default function App() {
                   }}
                 >
                   <div style={{ fontSize: 12, color: '#a898b8', marginBottom: 2 }}>
-                    {displayName(r.session_id)} 路 {formatTime(r.created_at)}
+                    {displayName(r.session_id)} · {formatTime(r.created_at)}
                   </div>
                   <div style={{
                     fontSize: 13, color: r.role === 'user' ? '#5b4a6a' : '#3a3a3a',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
-                    {r.role === 'user' ? '浣狅細' : '灏忓厠锛?}{r.content}
+                    {r.role === 'user' ? '你：' : '小克：'}{r.content}
                   </div>
                 </div>
               ))}
               {searchResults.length === 0 && (
                 <div style={{ padding: 16, color: '#a898b8', fontSize: 13, textAlign: 'center' }}>
-                  娌℃壘鍒扮浉鍏冲唴瀹?                </div>
+                  没找到相关内容
+                </div>
               )}
             </div>
           ) : (
@@ -515,7 +519,7 @@ export default function App() {
                     <div
                       onClick={() => saveRename(s.session_id)}
                       style={{ cursor: 'pointer', fontSize: 13, color: '#7b6a8a', padding: '4px' }}
-                    >鉁?/div>
+                    >✓</div>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -537,13 +541,13 @@ export default function App() {
                       <div
                         onClick={() => startRename(s.session_id)}
                         style={{ cursor: 'pointer', fontSize: 14, color: '#a898b8' }}
-                        title="鏀瑰悕"
-                      >鉁?/div>
+                        title="改名"
+                      >✏</div>
                       <div
                         onClick={() => deleteSession(s.session_id)}
                         style={{ cursor: 'pointer', fontSize: 14, color: '#d4a0a0' }}
-                        title="鍒犻櫎"
-                      >鉁?/div>
+                        title="删除"
+                      >✕</div>
                     </div>
                   </div>
                 )}
@@ -552,12 +556,13 @@ export default function App() {
           )}
           {!searchResults && sessions.length === 0 && (
             <div style={{ padding: 16, color: '#a898b8', fontSize: 13, textAlign: 'center' }}>
-              杩樻病鏈夊璇濊褰?            </div>
+              还没有对话记录
+            </div>
           )}
         </div>
       </div>
 
-      {/* 椤堕儴鏍?*/}
+      {/* 顶部栏 */}
       <div style={{
         padding: '14px 20px',
         background: 'rgba(255,255,255,0.5)',
@@ -579,7 +584,7 @@ export default function App() {
             color: '#9a8ab5',
             userSelect: 'none',
           }}
-        >鈽?/div>
+        >☰</div>
         <div
           onClick={startNewChat}
           style={{
@@ -590,17 +595,17 @@ export default function App() {
             color: '#9a8ab5',
             userSelect: 'none',
           }}
-          title="鏂板璇?
+          title="新对话"
         >+</div>
         <div style={{
           fontSize: 16,
           fontWeight: 600,
           color: '#7b6a8a',
           letterSpacing: 1,
-        }}>灏忓厠</div>
+        }}>小克</div>
       </div>
 
-      {/* 娑堟伅鍒楄〃 */}
+      {/* 消息列表 */}
       <div ref={listRef} style={{
         flex: 1,
         overflowY: 'auto',
@@ -646,7 +651,7 @@ export default function App() {
                     userSelect: 'none',
                   }}
                 >
-                  {expanded[m.id] ? '鈻?鏀惰捣鎬濊€? : '鈻?鏌ョ湅鎬濊€?}
+                  {expanded[m.id] ? '▼ 收起思考' : '▶ 查看思考'}
                 </div>
               )}
               {expanded[m.id] && m.thinking && (
@@ -665,7 +670,7 @@ export default function App() {
               )}
               <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
             </div>
-            {/* 鏃堕棿鎴?*/}
+            {/* 时间戳 */}
             {m.created_at && (
               <div style={{
                 fontSize: 11,
@@ -721,13 +726,13 @@ export default function App() {
               fontSize: 14,
               border: '1px solid rgba(255,255,255,0.3)',
             }}>
-              灏忓厠鍦ㄦ兂...
+              小克在想...
             </div>
           </div>
         )}
       </div>
 
-      {/* 杈撳叆鏍?*/}
+      {/* 输入栏 */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -744,7 +749,7 @@ export default function App() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder="璺熷皬鍏嬭鐐逛粈涔?.."
+          placeholder="跟小克说点什么..."
           disabled={loading}
           style={{
             flex: 1,
@@ -771,11 +776,9 @@ export default function App() {
             cursor: loading || !input.trim() ? 'default' : 'pointer',
           }}
         >
-          鍙戦€?        </button>
+          发送
+        </button>
       </div>
     </div>
   );
 }
-
-
-
