@@ -107,7 +107,8 @@ export default function App() {
         const today = new Date().toDateString();
         const weatherShownDate = localStorage.getItem('weather_shown_date') || '';
         const showWeather = weatherShownDate !== today;
-        if (!showWeather) return;
+        if (!showWeather && localStorage.getItem("greeting_shown_date") === today) return;
+        localStorage.setItem("greeting_shown_date", today);
 
         // 尝试获取城市
         let city = 'Changsha';
