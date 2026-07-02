@@ -39,6 +39,8 @@ function formatMsgTime(t) {
 // 可选模型列表
 const MODEL_OPTIONS = [
   { label: 'Sonnet 4.6', value: 'anthropic/claude-sonnet-4-6' },
+  { label: 'Opus 4.6', value: 'anthropic/claude-opus-4-6' },
+  { label: 'DeepSeek R1', value: 'deepseek/deepseek-r1' },
   { label: 'Haiku 4.5', value: 'anthropic/claude-haiku-4-5' },
   { label: 'GPT-4o', value: 'openai/gpt-4o' },
   { label: 'Gemini Flash', value: 'google/gemini-2.5-flash-preview-05-20' },
