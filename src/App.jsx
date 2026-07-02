@@ -61,6 +61,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [greetingMsg, setGreetingMsg] = useState(null);
   const listRef = useRef(null);
 
   // 验证密码
@@ -103,20 +104,36 @@ export default function App() {
     async function fetchGreeting() {
       try {
         const lastVisit = localStorage.getItem('last_visit') || '';
+        const today = new Date().toDateString();
+        const weatherShownDate = localStorage.getItem('weather_shown_date') || '';
+        const showWeather = weatherShownDate !== today;
+
+        // 尝试获取城市
+        let city = 'Changsha';
+        try {
+          const geoRes = await fetch('https://ipapi.co/json/');
+          if (geoRes.ok) {
+            const geoData = await geoRes.json();
+            if (geoData.city) city = geoData.city;
+          }
+        } catch {}
+
         const r = await authedFetch(`${API}/api/greeting`, {
           method: 'POST',
-          body: JSON.stringify({ last_visit: lastVisit || null }),
+          body: JSON.stringify({ last_visit: lastVisit || null, city, show_weather: showWeather }),
         });
         if (r.ok) {
           const data = await r.json();
           if (data.greeting) {
-            const greetingMsg = {
+            setGreetingMsg({
               id: 'greeting-' + Date.now(),
               role: 'assistant',
-              content: data.greeting + (data.weather ? '\n\n🌤 ' + data.weather.desc + ' ' + data.weather.temp + ' 体感' + data.weather.feelsLike : ''),
+              content: data.greeting,
               created_at: new Date().toISOString(),
-            };
-            setMessages(prev => [...prev, greetingMsg]);
+            });
+          }
+          if (showWeather) {
+            localStorage.setItem('weather_shown_date', today);
           }
         }
       } catch (err) { console.error(err); }
@@ -666,6 +683,33 @@ export default function App() {
             )}
           </div>
         ))}
+        {greetingMsg && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            marginBottom: 12,
+          }}>
+            <div style={{
+              maxWidth: '72%',
+              padding: '10px 14px',
+              borderRadius: '18px 18px 18px 4px',
+              background: 'rgba(255,255,255,0.25)',
+              backdropFilter: 'blur(10px)',
+              color: '#3a3a3a',
+              fontSize: 15,
+              lineHeight: 1.6,
+              textAlign: 'left',
+              boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
+              border: '1px solid rgba(255,255,255,0.3)',
+            }}>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{greetingMsg.content}</div>
+            </div>
+            <div style={{ fontSize: 11, color: '#b8a8c8', marginTop: 3, paddingLeft: 4 }}>
+              {formatMsgTime(greetingMsg.created_at)}
+            </div>
+          </div>
+        )}
         {loading && (
           <div style={{
             display: 'flex',
