@@ -61,8 +61,6 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
-  const [greeting, setGreeting] = useState('');
-  const [weatherInfo, setWeatherInfo] = useState(null);
   const listRef = useRef(null);
 
   // 验证密码
@@ -111,8 +109,15 @@ export default function App() {
         });
         if (r.ok) {
           const data = await r.json();
-          if (data.greeting) setGreeting(data.greeting);
-          if (data.weather) setWeatherInfo(data.weather);
+          if (data.greeting) {
+            const greetingMsg = {
+              id: 'greeting-' + Date.now(),
+              role: 'assistant',
+              content: data.greeting + (data.weather ? '\n\n🌤 ' + data.weather.desc + ' ' + data.weather.temp + ' 体感' + data.weather.feelsLike : ''),
+              created_at: new Date().toISOString(),
+            };
+            setMessages(prev => [...prev, greetingMsg]);
+          }
         }
       } catch (err) { console.error(err); }
       localStorage.setItem('last_visit', new Date().toISOString());
@@ -590,31 +595,6 @@ export default function App() {
         position: 'relative',
         zIndex: 2,
       }}>
-        {/* 智能问候 */}
-        {greeting && (
-          <div
-            onClick={() => setGreeting('')}
-            style={{
-              background: 'rgba(180,165,215,0.2)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(180,165,215,0.3)',
-              borderRadius: 16,
-              padding: '12px 16px',
-              marginBottom: 16,
-              textAlign: 'center',
-              color: '#5b4a6a',
-              fontSize: 14,
-              lineHeight: 1.6,
-            }}
-          >
-            {greeting}
-            {weatherInfo && (
-              <div style={{ fontSize: 12, color: '#a898b8', marginTop: 6 }}>
-                🌤 {weatherInfo.desc} {weatherInfo.temp} 体感{weatherInfo.feelsLike}
-              </div>
-            )}
-          </div>
-        )}
         {messages.map((m) => (
           <div
             key={m.id}
