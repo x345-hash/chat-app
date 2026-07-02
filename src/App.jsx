@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from 'react';
-import { getMessages, chat } from './lib/api';
 
 const API = import.meta.env.VITE_API_BASE;
 
@@ -7,7 +6,44 @@ function newId() {
   return 'chat-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+// 带密码的 fetch 封装
+function authedFetch(url, options = {}) {
+  const pwd = localStorage.getItem('app_password') || '';
+  const headers = {
+    ...options.headers,
+    'x-app-password': pwd,
+  };
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  }
+  return fetch(url, { ...options, headers });
+}
+
+// 格式化消息时间
+function formatMsgTime(t) {
+  try {
+    const d = new Date(t);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const isYesterday = d.toDateString() === yesterday.toDateString();
+
+    const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (isToday) return time;
+    if (isYesterday) return `昨天 ${time}`;
+    return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + ' ' + time;
+  } catch { return ''; }
+}
+
 export default function App() {
+  // 密码状态
+  const [authed, setAuthed] = useState(() => {
+    return !!localStorage.getItem('app_password');
+  });
+  const [pwdInput, setPwdInput] = useState('');
+  const [pwdError, setPwdError] = useState('');
+
   const [sessionId, setSessionId] = useState(() => {
     return localStorage.getItem('current_session') || 'default';
   });
@@ -27,10 +63,39 @@ export default function App() {
   const [searching, setSearching] = useState(false);
   const listRef = useRef(null);
 
+  // 验证密码
+  async function checkPassword() {
+    setPwdError('');
+    localStorage.setItem('app_password', pwdInput);
+    try {
+      const r = await authedFetch(`${API}/api/sessions`);
+      if (r.status === 401) {
+        localStorage.removeItem('app_password');
+        setPwdError('密码不对哦');
+        return;
+      }
+      setAuthed(true);
+    } catch {
+      localStorage.removeItem('app_password');
+      setPwdError('连接失败，检查网络');
+    }
+  }
+
+  // 加载消息
+  async function loadMessages(sid) {
+    try {
+      const r = await authedFetch(`${API}/api/messages?session_id=${sid}`);
+      if (r.status === 401) { setAuthed(false); return; }
+      const data = await r.json();
+      setMessages(data);
+    } catch (err) { console.error(err); }
+  }
+
   useEffect(() => {
+    if (!authed) return;
     localStorage.setItem('current_session', sessionId);
-    getMessages(sessionId).then(setMessages).catch(console.error);
-  }, [sessionId]);
+    loadMessages(sessionId);
+  }, [sessionId, authed]);
 
   useEffect(() => {
     listRef.current?.scrollTo(0, listRef.current.scrollHeight);
@@ -42,12 +107,11 @@ export default function App() {
 
   async function loadSessions() {
     try {
-      const r = await fetch(`${API}/api/sessions`);
+      const r = await authedFetch(`${API}/api/sessions`);
+      if (r.status === 401) { setAuthed(false); return; }
       const data = await r.json();
       setSessions(data);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   }
 
   function toggleSidebar() {
@@ -91,15 +155,14 @@ export default function App() {
   async function deleteSession(id) {
     if (!confirm('确定删除这个对话吗？删了就没了')) return;
     try {
-      const msgs = await fetch(`${API}/api/messages?session_id=${id}`).then(r => r.json());
+      const r = await authedFetch(`${API}/api/messages?session_id=${id}`);
+      const msgs = await r.json();
       if (Array.isArray(msgs)) {
         for (const m of msgs) {
-          await fetch(`${API}/api/messages/${m.id}`, { method: 'DELETE' });
+          await authedFetch(`${API}/api/messages/${m.id}`, { method: 'DELETE' });
         }
       }
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
     setSessionNames(n => { const copy = { ...n }; delete copy[id]; return copy; });
     setSessions(s => s.filter(x => x.session_id !== id));
     if (sessionId === id) startNewChat();
@@ -109,25 +172,28 @@ export default function App() {
     if (!searchQuery.trim()) return;
     setSearching(true);
     try {
-      const r = await fetch(`${API}/api/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      const r = await authedFetch(`${API}/api/search?q=${encodeURIComponent(searchQuery.trim())}`);
       const data = await r.json();
       setSearchResults(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSearching(false);
-    }
+    } catch (err) { console.error(err); }
+    finally { setSearching(false); }
   }
 
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
-    const tempUserMsg = { id: 'temp-' + Date.now(), role: 'user', content: text };
+    const tempUserMsg = { id: 'temp-' + Date.now(), role: 'user', content: text, created_at: new Date().toISOString() };
     setMessages((m) => [...m, tempUserMsg]);
     setInput('');
     setLoading(true);
     try {
-      const result = await chat({ session_id: sessionId, content: text });
+      const r = await authedFetch(`${API}/api/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, content: text }),
+      });
+      if (r.status === 401) { setAuthed(false); return; }
+      const result = await r.json();
+      if (result.error) throw new Error(result.error);
       setMessages((m) => [
         ...m.filter((x) => x.id !== tempUserMsg.id),
         result.user_message,
@@ -137,7 +203,7 @@ export default function App() {
       console.error(err);
       setMessages((m) => [
         ...m,
-        { id: 'err-' + Date.now(), role: 'error', content: err.message },
+        { id: 'err-' + Date.now(), role: 'error', content: err.message, created_at: new Date().toISOString() },
       ]);
     } finally {
       setLoading(false);
@@ -161,6 +227,88 @@ export default function App() {
     return id;
   }
 
+  // ===== 密码登录页 =====
+  if (!authed) {
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100dvh',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        position: 'relative',
+      }}>
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundImage: 'url(/bg.jpg)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          opacity: 0.5,
+          zIndex: 0,
+        }} />
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'linear-gradient(135deg, rgba(245,240,255,0.55), rgba(240,248,255,0.55))',
+          zIndex: 1,
+        }} />
+
+        <div style={{
+          position: 'relative', zIndex: 2,
+          background: 'rgba(255,255,255,0.6)',
+          backdropFilter: 'blur(16px)',
+          borderRadius: 20,
+          padding: '40px 32px',
+          width: 280,
+          textAlign: 'center',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+          border: '1px solid rgba(255,255,255,0.4)',
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>🔒</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#7b6a8a', marginBottom: 24 }}>小克的家</div>
+          <input
+            type="password"
+            value={pwdInput}
+            onChange={e => setPwdInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && checkPassword()}
+            placeholder="输入密码"
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              borderRadius: 14,
+              border: '1px solid rgba(200,190,220,0.4)',
+              background: 'rgba(255,255,255,0.6)',
+              fontSize: 16,
+              outline: 'none',
+              textAlign: 'center',
+              color: '#3a3a3a',
+              boxSizing: 'border-box',
+            }}
+          />
+          {pwdError && (
+            <div style={{ color: '#d4616b', fontSize: 13, marginTop: 8 }}>{pwdError}</div>
+          )}
+          <div
+            onClick={checkPassword}
+            style={{
+              marginTop: 16,
+              padding: '10px 0',
+              borderRadius: 14,
+              background: 'rgba(160,140,200,0.6)',
+              color: '#fff',
+              fontSize: 15,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >进入</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== 主界面 =====
   return (
     <div style={{
       display: 'flex',
@@ -198,6 +346,7 @@ export default function App() {
         />
       )}
 
+      {/* 侧边栏 */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -233,7 +382,6 @@ export default function App() {
           >+ 新对话</div>
         </div>
 
-        {/* 搜索框 */}
         <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(200,190,220,0.15)' }}>
           <div style={{ display: 'flex', gap: 4 }}>
             <input
@@ -244,7 +392,7 @@ export default function App() {
               style={{
                 flex: 1, padding: '6px 10px', borderRadius: 10,
                 border: '1px solid rgba(200,190,220,0.3)',
-                fontSize: 13, outline: 'none',
+                fontSize: 16, outline: 'none',
                 background: 'rgba(255,255,255,0.7)',
               }}
             />
@@ -254,13 +402,13 @@ export default function App() {
                 padding: '6px 10px', borderRadius: 10,
                 background: 'rgba(160,140,200,0.5)',
                 color: '#fff', fontSize: 13, cursor: 'pointer',
+                display: 'flex', alignItems: 'center',
               }}
             >搜</div>
           </div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-          {/* 搜索结果 */}
           {searchResults !== null ? (
             <div>
               <div style={{
@@ -300,7 +448,6 @@ export default function App() {
               )}
             </div>
           ) : (
-            /* 对话列表 */
             sessions.map((s) => (
               <div
                 key={s.session_id}
@@ -319,7 +466,7 @@ export default function App() {
                       style={{
                         flex: 1, padding: '4px 8px', borderRadius: 8,
                         border: '1px solid rgba(200,190,220,0.4)',
-                        fontSize: 13, outline: 'none',
+                        fontSize: 16, outline: 'none',
                       }}
                       autoFocus
                     />
@@ -369,6 +516,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* 顶部栏 */}
       <div style={{
         padding: '14px 20px',
         background: 'rgba(255,255,255,0.5)',
@@ -411,6 +559,7 @@ export default function App() {
         }}>小克</div>
       </div>
 
+      {/* 消息列表 */}
       <div ref={listRef} style={{
         flex: 1,
         overflowY: 'auto',
@@ -423,12 +572,13 @@ export default function App() {
             key={m.id}
             style={{
               display: 'flex',
-              justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
-              marginBottom: 10,
+              flexDirection: 'column',
+              alignItems: m.role === 'user' ? 'flex-end' : 'flex-start',
+              marginBottom: 12,
             }}
           >
             <div style={{
-              maxWidth: '75%',
+              maxWidth: '72%',
               padding: '10px 14px',
               borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
               background: m.role === 'user'
@@ -440,6 +590,7 @@ export default function App() {
               color: m.role === 'user' ? '#4a3a5a' : '#3a3a3a',
               fontSize: 15,
               lineHeight: 1.6,
+              textAlign: 'left',
               boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
               border: '1px solid rgba(255,255,255,0.3)',
             }}>
@@ -473,6 +624,18 @@ export default function App() {
               )}
               <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
             </div>
+            {/* 时间戳 */}
+            {m.created_at && (
+              <div style={{
+                fontSize: 11,
+                color: '#b8a8c8',
+                marginTop: 3,
+                paddingLeft: m.role === 'user' ? 0 : 4,
+                paddingRight: m.role === 'user' ? 4 : 0,
+              }}>
+                {formatMsgTime(m.created_at)}
+              </div>
+            )}
           </div>
         ))}
         {loading && (
@@ -496,6 +659,7 @@ export default function App() {
         )}
       </div>
 
+      {/* 输入栏 */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -520,7 +684,7 @@ export default function App() {
             borderRadius: 20,
             border: '1px solid rgba(200,190,220,0.3)',
             background: 'rgba(255,255,255,0.5)',
-            fontSize: 15,
+            fontSize: 16,
             outline: 'none',
             color: '#3a3a3a',
           }}
