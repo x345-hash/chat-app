@@ -578,7 +578,7 @@ export default function App() {
               <input
                 type="date"
                 value={dateFilter}
-                onChange={e => { setDateFilter(e.target.value); setShowSidebar(false); setShowDatePicker(false); }}
+                onChange={e => setDateFilter(e.target.value)}
                 style={{
                   width: '100%', padding: '6px 10px', borderRadius: 10,
                   border: '1px solid rgba(200,190,220,0.3)',
