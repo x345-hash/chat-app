@@ -36,6 +36,14 @@ function formatMsgTime(t) {
   } catch { return ''; }
 }
 
+// 可选模型列表
+const MODEL_OPTIONS = [
+  { label: 'Sonnet 4.6', value: 'anthropic/claude-sonnet-4-6' },
+  { label: 'Haiku 4.5', value: 'anthropic/claude-haiku-4-5' },
+  { label: 'GPT-4o', value: 'openai/gpt-4o' },
+  { label: 'Gemini Flash', value: 'google/gemini-2.5-flash-preview-05-20' },
+];
+
 export default function App() {
   // 密码状态
   const [authed, setAuthed] = useState(() => {
@@ -63,6 +71,28 @@ export default function App() {
   const [searching, setSearching] = useState(false);
   const [greetingMsg, setGreetingMsg] = useState(null);
   const listRef = useRef(null);
+
+  // 新功能状态
+  const [selectedModel, setSelectedModel] = useState(() => {
+    return localStorage.getItem('selected_model') || '';
+  });
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const [starred, setStarred] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('starred_msgs') || '[]'); } catch { return []; }
+  });
+  const [showStarred, setShowStarred] = useState(false);
+  const [dateFilter, setDateFilter] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // 存储收藏
+  useEffect(() => {
+    localStorage.setItem('starred_msgs', JSON.stringify(starred));
+  }, [starred]);
+
+  // 存储模型选择
+  useEffect(() => {
+    localStorage.setItem('selected_model', selectedModel);
+  }, [selectedModel]);
 
   // 验证密码
   async function checkPassword() {
@@ -122,7 +152,7 @@ export default function App() {
 
         const r = await authedFetch(`${API}/api/greeting`, {
           method: 'POST',
-          body: JSON.stringify({ last_visit: lastVisit || null, city, show_weather: showWeather, session_id: currentSessionId }),
+          body: JSON.stringify({ last_visit: lastVisit || null, city, show_weather: showWeather, session_id: sessionId }),
         });
         if (r.ok) {
           const data = await r.json();
@@ -146,7 +176,7 @@ export default function App() {
 
   useEffect(() => {
     listRef.current?.scrollTo(0, listRef.current.scrollHeight);
-  }, [messages]);
+  }, [messages, greetingMsg]);
 
   useEffect(() => {
     localStorage.setItem('session_names', JSON.stringify(sessionNames));
@@ -166,6 +196,9 @@ export default function App() {
     setShowSidebar(!showSidebar);
     setSearchResults(null);
     setSearchQuery('');
+    setShowStarred(false);
+    setDateFilter('');
+    setShowDatePicker(false);
   }
 
   function switchSession(id) {
@@ -175,6 +208,8 @@ export default function App() {
     setEditingId(null);
     setSearchResults(null);
     setSearchQuery('');
+    setShowStarred(false);
+    setDateFilter('');
   }
 
   function startNewChat() {
@@ -185,6 +220,8 @@ export default function App() {
     setShowSidebar(false);
     setEditingId(null);
     setSearchResults(null);
+    setShowStarred(false);
+    setDateFilter('');
   }
 
   function startRename(id) {
@@ -226,6 +263,7 @@ export default function App() {
     finally { setSearching(false); }
   }
 
+  // 发消息
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
@@ -234,9 +272,11 @@ export default function App() {
     setInput('');
     setLoading(true);
     try {
+      const body = { session_id: sessionId, content: text };
+      if (selectedModel) body.model = selectedModel;
       const r = await authedFetch(`${API}/api/chat`, {
         method: 'POST',
-        body: JSON.stringify({ session_id: sessionId, content: text }),
+        body: JSON.stringify(body),
       });
       if (r.status === 401) { setAuthed(false); return; }
       const result = await r.json();
@@ -273,6 +313,51 @@ export default function App() {
     if (id === 'default') return '默认对话';
     return id;
   }
+
+  // 收藏/取消收藏
+  function toggleStar(msgId) {
+    setStarred(prev => {
+      if (prev.includes(msgId)) return prev.filter(id => id !== msgId);
+      return [...prev, msgId];
+    });
+  }
+
+  // 导出聊天记录
+  function exportChat() {
+    if (messages.length === 0) return;
+    const name = sessionNames[sessionId] || sessionId;
+    let text = `聊天记录：${name}\n导出时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}\n${'─'.repeat(30)}\n\n`;
+    for (const m of messages) {
+      if (m.role === 'error') continue;
+      const time = m.created_at ? new Date(m.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '';
+      const who = m.role === 'user' ? '佳佳' : '小克';
+      text += `[${time}] ${who}：${m.content}\n\n`;
+    }
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}_${new Date().toLocaleDateString('zh-CN')}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // 按日期筛选消息
+  const filteredMessages = dateFilter
+    ? messages.filter(m => {
+        if (!m.created_at) return false;
+        const d = new Date(m.created_at).toLocaleDateString('en-CA'); // YYYY-MM-DD
+        return d === dateFilter;
+      })
+    : messages;
+
+  // 收藏的消息
+  const starredMessages = messages.filter(m => starred.includes(m.id));
+
+  // 当前显示的模型名
+  const currentModelLabel = selectedModel
+    ? (MODEL_OPTIONS.find(m => m.value === selectedModel)?.label || selectedModel.split('/').pop())
+    : '默认';
 
   // ===== 密码登录页 =====
   if (!authed) {
@@ -383,7 +468,7 @@ export default function App() {
 
       {showSidebar && (
         <div
-          onClick={() => { setShowSidebar(false); setEditingId(null); setSearchResults(null); }}
+          onClick={() => { setShowSidebar(false); setEditingId(null); setSearchResults(null); setShowStarred(false); setDateFilter(''); setShowDatePicker(false); }}
           style={{
             position: 'fixed',
             top: 0, left: 0, right: 0, bottom: 0,
@@ -416,17 +501,31 @@ export default function App() {
           alignItems: 'center',
         }}>
           <span style={{ fontSize: 15, fontWeight: 600, color: '#7b6a8a' }}>历史对话</span>
-          <div
-            onClick={startNewChat}
-            style={{
-              padding: '4px 12px',
-              borderRadius: 12,
-              background: 'rgba(160,140,200,0.6)',
-              color: '#fff',
-              fontSize: 13,
-              cursor: 'pointer',
-            }}
-          >+ 新对话</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <div
+              onClick={exportChat}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 12,
+                background: 'rgba(140,160,200,0.5)',
+                color: '#fff',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+              title="导出当前对话"
+            >导出</div>
+            <div
+              onClick={startNewChat}
+              style={{
+                padding: '4px 12px',
+                borderRadius: 12,
+                background: 'rgba(160,140,200,0.6)',
+                color: '#fff',
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >+ 新对话</div>
+          </div>
         </div>
 
         <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(200,190,220,0.15)' }}>
@@ -453,10 +552,81 @@ export default function App() {
               }}
             >搜</div>
           </div>
+          {/* 工具按钮行 */}
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <div
+              onClick={() => { setShowStarred(!showStarred); setSearchResults(null); setDateFilter(''); setShowDatePicker(false); }}
+              style={{
+                flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center',
+                background: showStarred ? 'rgba(255,200,50,0.3)' : 'rgba(200,190,220,0.2)',
+                color: '#7b6a8a', fontSize: 12, cursor: 'pointer',
+              }}
+            >⭐ 收藏</div>
+            <div
+              onClick={() => { setShowDatePicker(!showDatePicker); setShowStarred(false); setSearchResults(null); }}
+              style={{
+                flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center',
+                background: showDatePicker ? 'rgba(160,200,140,0.3)' : 'rgba(200,190,220,0.2)',
+                color: '#7b6a8a', fontSize: 12, cursor: 'pointer',
+              }}
+            >📅 按日期</div>
+          </div>
+          {showDatePicker && (
+            <div style={{ marginTop: 6 }}>
+              <input
+                type="date"
+                value={dateFilter}
+                onChange={e => { setDateFilter(e.target.value); setShowSidebar(false); setShowDatePicker(false); }}
+                style={{
+                  width: '100%', padding: '6px 10px', borderRadius: 10,
+                  border: '1px solid rgba(200,190,220,0.3)',
+                  fontSize: 14, outline: 'none', background: 'rgba(255,255,255,0.7)',
+                  boxSizing: 'border-box',
+                }}
+              />
+              {dateFilter && (
+                <div
+                  onClick={() => { setDateFilter(''); setShowDatePicker(false); }}
+                  style={{ fontSize: 12, color: '#9a8ab5', marginTop: 4, cursor: 'pointer', textAlign: 'center' }}
+                >清除日期筛选</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-          {searchResults !== null ? (
+          {/* 收藏消息列表 */}
+          {showStarred ? (
+            <div>
+              <div style={{ padding: '8px 16px', fontSize: 12, color: '#a898b8' }}>
+                收藏了 {starredMessages.length} 条消息
+              </div>
+              {starredMessages.length === 0 && (
+                <div style={{ padding: 16, color: '#a898b8', fontSize: 13, textAlign: 'center' }}>
+                  还没有收藏的消息，长按消息气泡可以收藏
+                </div>
+              )}
+              {starredMessages.map(m => (
+                <div
+                  key={m.id}
+                  style={{
+                    padding: '8px 16px', borderBottom: '1px solid rgba(200,190,220,0.1)',
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: '#a898b8', marginBottom: 2 }}>
+                    {m.role === 'user' ? '佳佳' : '小克'} · {formatMsgTime(m.created_at)}
+                  </div>
+                  <div style={{
+                    fontSize: 13, color: '#3a3a3a',
+                    overflow: 'hidden', textOverflow: 'ellipsis',
+                    display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                  }}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : searchResults !== null ? (
             <div>
               <div style={{
                 padding: '8px 16px', fontSize: 12, color: '#a898b8',
@@ -555,7 +725,7 @@ export default function App() {
               </div>
             ))
           )}
-          {!searchResults && sessions.length === 0 && (
+          {!searchResults && !showStarred && sessions.length === 0 && (
             <div style={{ padding: 16, color: '#a898b8', fontSize: 13, textAlign: 'center' }}>
               还没有对话记录
             </div>
@@ -598,13 +768,89 @@ export default function App() {
           }}
           title="新对话"
         >+</div>
-        <div style={{
-          fontSize: 16,
-          fontWeight: 600,
-          color: '#7b6a8a',
-          letterSpacing: 1,
-        }}>小克</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: 16,
+            fontWeight: 600,
+            color: '#7b6a8a',
+            letterSpacing: 1,
+          }}>小克</div>
+          {/* 模型选择器 */}
+          <div
+            onClick={() => setShowModelPicker(!showModelPicker)}
+            style={{
+              fontSize: 11,
+              color: '#a898b8',
+              cursor: 'pointer',
+              marginTop: 2,
+            }}
+          >{currentModelLabel} ▾</div>
+        </div>
       </div>
+
+      {/* 模型选择弹窗 */}
+      {showModelPicker && (
+        <div style={{
+          position: 'absolute',
+          top: 60,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(255,255,255,0.95)',
+          backdropFilter: 'blur(16px)',
+          borderRadius: 14,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+          border: '1px solid rgba(200,190,220,0.3)',
+          zIndex: 20,
+          overflow: 'hidden',
+          minWidth: 180,
+        }}>
+          <div
+            onClick={() => { setSelectedModel(''); setShowModelPicker(false); }}
+            style={{
+              padding: '10px 16px',
+              fontSize: 14,
+              color: !selectedModel ? '#7b6a8a' : '#5b4a6a',
+              background: !selectedModel ? 'rgba(180,165,215,0.15)' : 'transparent',
+              cursor: 'pointer',
+            }}
+          >默认 (Sonnet 4.6)</div>
+          {MODEL_OPTIONS.map(m => (
+            <div
+              key={m.value}
+              onClick={() => { setSelectedModel(m.value); setShowModelPicker(false); }}
+              style={{
+                padding: '10px 16px',
+                fontSize: 14,
+                color: selectedModel === m.value ? '#7b6a8a' : '#5b4a6a',
+                background: selectedModel === m.value ? 'rgba(180,165,215,0.15)' : 'transparent',
+                cursor: 'pointer',
+                borderTop: '1px solid rgba(200,190,220,0.1)',
+              }}
+            >{m.label}</div>
+          ))}
+        </div>
+      )}
+
+      {/* 日期筛选提示 */}
+      {dateFilter && (
+        <div style={{
+          padding: '6px 16px',
+          background: 'rgba(160,200,140,0.2)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          position: 'relative',
+          zIndex: 2,
+        }}>
+          <span style={{ fontSize: 12, color: '#5a7a4a' }}>
+            📅 查看 {new Date(dateFilter + 'T00:00:00').toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })} 的消息（{filteredMessages.length} 条）
+          </span>
+          <span
+            onClick={() => setDateFilter('')}
+            style={{ fontSize: 12, color: '#9a8ab5', cursor: 'pointer' }}
+          >清除</span>
+        </div>
+      )}
 
       {/* 消息列表 */}
       <div ref={listRef} style={{
@@ -614,7 +860,36 @@ export default function App() {
         position: 'relative',
         zIndex: 2,
       }}>
-        {messages.map((m) => (
+        {/* 问候消息放在最前面 */}
+        {greetingMsg && !dateFilter && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            marginBottom: 12,
+          }}>
+            <div style={{
+              maxWidth: '72%',
+              padding: '10px 14px',
+              borderRadius: '18px 18px 18px 4px',
+              background: 'rgba(255,255,255,0.25)',
+              backdropFilter: 'blur(10px)',
+              color: '#3a3a3a',
+              fontSize: 15,
+              lineHeight: 1.6,
+              textAlign: 'left',
+              boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
+              border: '1px solid rgba(255,255,255,0.3)',
+            }}>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{greetingMsg.content}</div>
+            </div>
+            <div style={{ fontSize: 11, color: '#b8a8c8', marginTop: 3, paddingLeft: 4 }}>
+              {formatMsgTime(greetingMsg.created_at)}
+            </div>
+          </div>
+        )}
+
+        {filteredMessages.map((m) => (
           <div
             key={m.id}
             style={{
@@ -624,26 +899,33 @@ export default function App() {
               marginBottom: 12,
             }}
           >
-            <div style={{
-              maxWidth: '72%',
-              padding: '10px 14px',
-              borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-              background: m.role === 'user'
-                ? 'rgba(180,165,215,0.25)'
-                : m.role === 'error'
-                ? 'rgba(255,180,180,0.5)'
-                : 'rgba(255,255,255,0.25)',
-              backdropFilter: 'blur(10px)',
-              color: m.role === 'user' ? '#4a3a5a' : '#3a3a3a',
-              fontSize: 15,
-              lineHeight: 1.6,
-              textAlign: 'left',
-              boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
-              border: '1px solid rgba(255,255,255,0.3)',
-            }}>
+            <div
+              onClick={() => toggleStar(m.id)}
+              style={{
+                maxWidth: '72%',
+                padding: '10px 14px',
+                borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                background: m.role === 'user'
+                  ? 'rgba(180,165,215,0.25)'
+                  : m.role === 'error'
+                  ? 'rgba(255,180,180,0.5)'
+                  : 'rgba(255,255,255,0.25)',
+                backdropFilter: 'blur(10px)',
+                color: m.role === 'user' ? '#4a3a5a' : '#3a3a3a',
+                fontSize: 15,
+                lineHeight: 1.6,
+                textAlign: 'left',
+                boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
+                border: starred.includes(m.id) ? '1px solid rgba(255,200,50,0.5)' : '1px solid rgba(255,255,255,0.3)',
+                position: 'relative',
+                cursor: 'pointer',
+              }}>
+              {starred.includes(m.id) && (
+                <div style={{ position: 'absolute', top: 4, right: 8, fontSize: 10 }}>⭐</div>
+              )}
               {m.thinking && (
                 <div
-                  onClick={() => toggleThinking(m.id)}
+                  onClick={(e) => { e.stopPropagation(); toggleThinking(m.id); }}
                   style={{
                     fontSize: 12,
                     color: '#a898b8',
@@ -685,33 +967,6 @@ export default function App() {
             )}
           </div>
         ))}
-        {greetingMsg && (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            marginBottom: 12,
-          }}>
-            <div style={{
-              maxWidth: '72%',
-              padding: '10px 14px',
-              borderRadius: '18px 18px 18px 4px',
-              background: 'rgba(255,255,255,0.25)',
-              backdropFilter: 'blur(10px)',
-              color: '#3a3a3a',
-              fontSize: 15,
-              lineHeight: 1.6,
-              textAlign: 'left',
-              boxShadow: '0 1px 6px rgba(0,0,0,0.04)',
-              border: '1px solid rgba(255,255,255,0.3)',
-            }}>
-              <div style={{ whiteSpace: 'pre-wrap' }}>{greetingMsg.content}</div>
-            </div>
-            <div style={{ fontSize: 11, color: '#b8a8c8', marginTop: 3, paddingLeft: 4 }}>
-              {formatMsgTime(greetingMsg.created_at)}
-            </div>
-          </div>
-        )}
         {loading && (
           <div style={{
             display: 'flex',
@@ -780,6 +1035,14 @@ export default function App() {
           发送
         </button>
       </div>
+
+      {/* 点击其他地方关闭模型选择器 */}
+      {showModelPicker && (
+        <div
+          onClick={() => setShowModelPicker(false)}
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 15 }}
+        />
+      )}
     </div>
   );
 }
