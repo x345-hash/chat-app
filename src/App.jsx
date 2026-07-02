@@ -84,7 +84,25 @@ export default function App() {
   });
   const [showStarred, setShowStarred] = useState(false);
   const [dateFilter, setDateFilter] = useState('');
+  const [showDates, setShowDates] = useState(false);
+  const [dates, setDates] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('my_dates') || '[]'); } catch { return []; }
+  });
+  const [newDateName, setNewDateName] = useState('');
+  const [newDateValue, setNewDateValue] = useState('');
+  const [newDateType, setNewDateType] = useState('countup');
+  const [theme, setTheme] = useState(() => localStorage.getItem('app_theme') || 'purple');
   const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // 存储纪念日
+  useEffect(() => {
+    localStorage.setItem('my_dates', JSON.stringify(dates));
+  }, [dates]);
+
+  // 存储主题
+  useEffect(() => {
+    localStorage.setItem('app_theme', theme);
+  }, [theme]);
 
   // 存储收藏
   useEffect(() => {
@@ -361,6 +379,44 @@ export default function App() {
     ? (MODEL_OPTIONS.find(m => m.value === selectedModel)?.label || selectedModel.split('/').pop())
     : '默认';
 
+  // 主题配色
+  const themes = {
+    purple: { accent: 'rgba(180,165,215,0.25)', text: '#4a3a5a', bg: 'linear-gradient(135deg, rgba(245,240,255,0.55), rgba(240,248,255,0.55))', header: '#7b6a8a', sub: '#a898b8', border: 'rgba(200,190,220,0.3)' },
+    pink: { accent: 'rgba(215,165,180,0.25)', text: '#5a3a4a', bg: 'linear-gradient(135deg, rgba(255,240,245,0.55), rgba(255,245,248,0.55))', header: '#8a6a7b', sub: '#b898a8', border: 'rgba(220,190,200,0.3)' },
+    blue: { accent: 'rgba(165,190,215,0.25)', text: '#3a4a5a', bg: 'linear-gradient(135deg, rgba(240,245,255,0.55), rgba(245,248,255,0.55))', header: '#6a7b8a', sub: '#98a8b8', border: 'rgba(190,200,220,0.3)' },
+    green: { accent: 'rgba(165,215,180,0.25)', text: '#3a5a4a', bg: 'linear-gradient(135deg, rgba(240,255,245,0.55), rgba(245,255,248,0.55))', header: '#6a8a7b', sub: '#98b8a8', border: 'rgba(190,220,200,0.3)' },
+  };
+  const T = themes[theme] || themes.purple;
+
+  // 计算天数
+  function calcDays(dateStr, type) {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diff = Math.floor((now - d) / 86400000);
+    if (type === 'countup') return diff >= 0 ? '第 ' + (diff + 1) + ' 天' : '还没开始';
+    if (type === 'countdown') {
+      let next = new Date(d);
+      next.setFullYear(now.getFullYear());
+      if (next < now) next.setFullYear(now.getFullYear() + 1);
+      const left = Math.ceil((next - now) / 86400000);
+      return left === 0 ? '就是今天！' : '还有 ' + left + ' 天';
+    }
+    if (type === 'record') return diff + ' 天前';
+    return '';
+  }
+
+  function addDate() {
+    if (!newDateName.trim() || !newDateValue) return;
+    setDates(prev => [...prev, { id: Date.now(), name: newDateName.trim(), date: newDateValue, type: newDateType }]);
+    setNewDateName('');
+    setNewDateValue('');
+    setNewDateType('countup');
+  }
+
+  function removeDate(id) {
+    setDates(prev => prev.filter(d => d.id !== id));
+  }
+
   // ===== 密码登录页 =====
   if (!authed) {
     return (
@@ -464,7 +520,7 @@ export default function App() {
       <div style={{
         position: 'fixed',
         top: 0, left: 0, right: 0, bottom: 0,
-        background: 'linear-gradient(135deg, rgba(245,240,255,0.55), rgba(240,248,255,0.55))',
+        background: T.bg,
         zIndex: 1,
       }} />
 
@@ -572,6 +628,24 @@ export default function App() {
                 color: '#7b6a8a', fontSize: 12, cursor: 'pointer',
               }}
             >📅 按日期</div>
+            <div
+              onClick={() => { setShowDates(!showDates); setShowStarred(false); setSearchResults(null); setShowDatePicker(false); }}
+              style={{
+                flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center',
+                background: showDates ? 'rgba(215,165,180,0.3)' : 'rgba(200,190,220,0.2)',
+                color: '#7b6a8a', fontSize: 12, cursor: 'pointer',
+              }}
+            >💕 纪念日</div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            {['purple','pink','blue','green'].map(t => (
+              <div key={t} onClick={() => setTheme(t)} style={{
+                flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center',
+                background: theme === t ? themes[t].accent : 'rgba(200,190,220,0.15)',
+                fontSize: 11, cursor: 'pointer', color: themes[t].header,
+                border: theme === t ? '1px solid ' + themes[t].border : '1px solid transparent',
+              }}>{t === 'purple' ? '💜' : t === 'pink' ? '💗' : t === 'blue' ? '💙' : '💚'}</div>
+            ))}
           </div>
           {showDatePicker && (
             <div style={{ marginTop: 6 }}>
@@ -597,8 +671,41 @@ export default function App() {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-          {/* 收藏消息列表 */}
-          {showStarred ? (
+          {/* 纪念日面板 */}
+          {showDates ? (
+            <div style={{ padding: '8px 12px' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#7b6a8a', marginBottom: 8 }}>我的纪念日</div>
+              {dates.map(d => (
+                <div key={d.id} style={{
+                  padding: '8px 10px', marginBottom: 6, borderRadius: 10,
+                  background: 'rgba(255,255,255,0.5)', border: '1px solid rgba(200,190,220,0.2)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: 13, color: '#5b4a6a', fontWeight: 500 }}>{d.name}</div>
+                    <div onClick={() => removeDate(d.id)} style={{ fontSize: 12, color: '#d4a0a0', cursor: 'pointer' }}>✕</div>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#a898b8', marginTop: 2 }}>{d.date}</div>
+                  <div style={{ fontSize: 14, color: '#7b6a8a', fontWeight: 600, marginTop: 2 }}>{calcDays(d.date, d.type)}</div>
+                </div>
+              ))}
+              {dates.length === 0 && <div style={{ fontSize: 12, color: '#a898b8', textAlign: 'center', padding: 12 }}>还没有纪念日，添加一个吧</div>}
+              <div style={{ marginTop: 10, padding: '8px', borderRadius: 10, background: 'rgba(245,240,255,0.5)', border: '1px solid rgba(200,190,220,0.2)' }}>
+                <input value={newDateName} onChange={e => setNewDateName(e.target.value)} placeholder="名称（如：在一起）" style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(200,190,220,0.3)', fontSize: 14, outline: 'none', marginBottom: 4, boxSizing: 'border-box' }} />
+                <input type="date" value={newDateValue} onChange={e => setNewDateValue(e.target.value)} style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid rgba(200,190,220,0.3)', fontSize: 14, outline: 'none', marginBottom: 4, boxSizing: 'border-box' }} />
+                <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                  {[['countup','正计时'],['countdown','倒计时'],['record','记录']].map(([v,l]) => (
+                    <div key={v} onClick={() => setNewDateType(v)} style={{
+                      flex: 1, padding: '4px 0', borderRadius: 8, textAlign: 'center', fontSize: 12, cursor: 'pointer',
+                      background: newDateType === v ? 'rgba(160,140,200,0.4)' : 'rgba(200,190,220,0.15)',
+                      color: newDateType === v ? '#fff' : '#7b6a8a',
+                    }}>{l}</div>
+                  ))}
+                </div>
+                <div onClick={addDate} style={{ padding: '6px 0', borderRadius: 8, textAlign: 'center', background: 'rgba(160,140,200,0.6)', color: '#fff', fontSize: 13, cursor: 'pointer' }}>添加</div>
+              </div>
+            </div>
+          ) : {/* 收藏消息列表 */}
+          showStarred ? (
             <div>
               <div style={{ padding: '8px 16px', fontSize: 12, color: '#a898b8' }}>
                 收藏了 {starredMessages.length} 条消息
@@ -908,7 +1015,7 @@ export default function App() {
                 padding: '10px 14px',
                 borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
                 background: m.role === 'user'
-                  ? 'rgba(180,165,215,0.25)'
+                  ? T.accent
                   : m.role === 'error'
                   ? 'rgba(255,180,180,0.5)'
                   : 'rgba(255,255,255,0.25)',
