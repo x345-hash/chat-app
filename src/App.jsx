@@ -13,6 +13,8 @@ function authedFetch(url, options = {}) {
   return fetch(url, { ...options, headers });
 }
 
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 function formatMsgTime(t) {
   try {
     const d = new Date(t);
@@ -78,6 +80,7 @@ export default function App() {
   const [searching, setSearching] = useState(false);
   const [greetingMsg, setGreetingMsg] = useState(null);
   const listRef = useRef(null);
+  const fileRef = useRef(null);
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('selected_model') || '');
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [starred, setStarred] = useState(() => { try { return JSON.parse(localStorage.getItem('starred_msgs') || '[]'); } catch { return []; } });
@@ -90,6 +93,9 @@ export default function App() {
   const [newDateName, setNewDateName] = useState('');
   const [newDateValue, setNewDateValue] = useState('');
   const [newDateType, setNewDateType] = useState('countup');
+  const [reasoningOn, setReasoningOn] = useState(() => localStorage.getItem('reasoning_on') === '1');
+  const [pendingImage, setPendingImage] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   const T = THEMES[theme] || THEMES.purple;
 
@@ -97,6 +103,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('selected_model', selectedModel); }, [selectedModel]);
   useEffect(() => { localStorage.setItem('my_dates', JSON.stringify(dates)); }, [dates]);
   useEffect(() => { localStorage.setItem('app_theme', theme); }, [theme]);
+  useEffect(() => { localStorage.setItem('reasoning_on', reasoningOn ? '1' : '0'); }, [reasoningOn]);
 
   async function checkPassword() {
     setPwdError('');
@@ -109,11 +116,17 @@ export default function App() {
   }
 
   async function loadMessages(sid) {
-    try {
-      const r = await authedFetch(API + '/api/messages?session_id=' + sid);
-      if (r.status === 401) { setAuthed(false); return; }
-      setMessages(await r.json());
-    } catch (err) { console.error(err); }
+    let lastErr = null;
+    for (let i = 0; i < 3; i++) {
+      try {
+        const r = await authedFetch(API + '/api/messages?session_id=' + sid);
+        if (r.status === 401) { setAuthed(false); return; }
+        if (!r.ok) throw new Error('load ' + r.status);
+        setMessages(await r.json());
+        return;
+      } catch (err) { lastErr = err; console.error('loadMessages retry', i + 1, err); await sleep(1500 * (i + 1)); }
+    }
+    console.error('loadMessages failed after retries', lastErr);
   }
 
   useEffect(() => { if (!authed) return; localStorage.setItem('current_session', sessionId); loadMessages(sessionId); }, [sessionId, authed]);
@@ -161,18 +174,73 @@ export default function App() {
 
   async function doSearch() { if (!searchQuery.trim()) return; setSearching(true); try { const r = await authedFetch(API + '/api/search?q=' + encodeURIComponent(searchQuery.trim())); setSearchResults(await r.json()); } catch (err) { console.error(err); } finally { setSearching(false); } }
 
+  function pickImage() { fileRef.current?.click(); }
+
+  function onFilePicked(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { alert('图片太大了，换张8MB以内的'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const base64 = String(dataUrl).split(',')[1];
+      setPendingImage({ base64, mimetype: file.type || 'image/jpeg', preview: dataUrl });
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function send() {
-    const text = input.trim(); if (!text || loading) return;
-    const tmp = { id: 'temp-' + Date.now(), role: 'user', content: text, created_at: new Date().toISOString() };
-    setMessages(m => [...m, tmp]); setInput(''); setLoading(true);
+    const text = input.trim();
+    const img = pendingImage;
+    if ((!text && !img) || loading) return;
+    const tmp = { id: 'temp-' + Date.now(), role: 'user', content: text || '[图片]', image_url: img ? img.preview : null, created_at: new Date().toISOString() };
+    setMessages(m => [...m, tmp]); setInput(''); setPendingImage(null); setLoading(true);
     try {
-      const body = { session_id: sessionId, content: text }; if (selectedModel) body.model = selectedModel;
-      const r = await authedFetch(API + '/api/chat', { method: 'POST', body: JSON.stringify(body) });
-      if (r.status === 401) { setAuthed(false); return; }
-      const result = await r.json(); if (result.error) throw new Error(result.error);
+      let imageUrl = null;
+      if (img) {
+        setUploading(true);
+        let upErr = null;
+        for (let i = 0; i < 3; i++) {
+          try {
+            const ur = await authedFetch(API + '/api/upload', { method: 'POST', body: JSON.stringify({ base64: img.base64, mimetype: img.mimetype }) });
+            if (!ur.ok) throw new Error('upload ' + ur.status);
+            const ud = await ur.json();
+            imageUrl = ud.url; upErr = null; break;
+          } catch (err) { upErr = err; console.error('upload retry', i + 1, err); await sleep(1500 * (i + 1)); }
+        }
+        setUploading(false);
+        if (upErr) throw new Error('图片上传失败: ' + upErr.message);
+      }
+      const body = { session_id: sessionId, content: text, reasoning: reasoningOn };
+      if (selectedModel) body.model = selectedModel;
+      if (imageUrl) body.image_url = imageUrl;
+
+      let result = null, lastErr = null;
+      for (let i = 0; i < 3; i++) {
+        try {
+          const r = await authedFetch(API + '/api/chat', { method: 'POST', body: JSON.stringify(body) });
+          if (r.status === 401) { setAuthed(false); return; }
+          const data = await r.json();
+          if (!r.ok || data.error) {
+            const msg = data.error || ('HTTP ' + r.status);
+            if (r.status >= 500 || /fetch|network|timeout|load/i.test(msg)) throw new Error(msg);
+            throw { fatal: true, message: msg };
+          }
+          result = data; lastErr = null; break;
+        } catch (err) {
+          if (err && err.fatal) { lastErr = err; break; }
+          lastErr = err; console.error('chat retry', i + 1, err);
+          await sleep(2000 * (i + 1));
+        }
+      }
+      if (!result) throw new Error(lastErr?.message || 'Load failed');
       setMessages(m => [...m.filter(x => x.id !== tmp.id), result.user_message, result.assistant_message]);
-    } catch (err) { console.error(err); setMessages(m => [...m, { id: 'err-' + Date.now(), role: 'error', content: err.message, created_at: new Date().toISOString() }]); }
-    finally { setLoading(false); }
+    } catch (err) {
+      console.error(err);
+      setMessages(m => [...m, { id: 'err-' + Date.now(), role: 'error', content: err.message, created_at: new Date().toISOString() }]);
+    }
+    finally { setLoading(false); setUploading(false); }
   }
 
   function toggleThinking(id) { setExpanded(e => ({ ...e, [id]: !e[id] })); }
@@ -183,7 +251,7 @@ export default function App() {
   function exportChat() {
     if (!messages.length) return;
     const name = sessionNames[sessionId] || sessionId;
-    let text = '聊天记录：' + name + '\n导出时间：' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + '\n' + '─'.repeat(30) + '\n\n';
+    let text = '聊天记录：' + name + '\n导出时间：' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + '\n' + '—'.repeat(30) + '\n\n';
     for (const m of messages) { if (m.role === 'error') continue; const time = m.created_at ? new Date(m.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : ''; text += '[' + time + '] ' + (m.role === 'user' ? '佳佳' : '小克') + '：' + m.content + '\n\n'; }
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' }); const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = name + '_' + new Date().toLocaleDateString('zh-CN') + '.txt'; a.click(); URL.revokeObjectURL(url);
@@ -202,7 +270,7 @@ export default function App() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundImage: 'url(/bg.jpg)', backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.5, zIndex: 0 }} />
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: T.bg, zIndex: 1 }} />
         <div style={{ position: 'relative', zIndex: 2, background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(16px)', borderRadius: 20, padding: '40px 32px', width: 280, textAlign: 'center', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', border: '1px solid rgba(255,255,255,0.4)' }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>🔒</div>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>💜</div>
           <div style={{ fontSize: 16, fontWeight: 600, color: T.header, marginBottom: 24 }}>小克的家</div>
           <input type="password" value={pwdInput} onChange={e => setPwdInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && checkPassword()} placeholder="输入密码" style={{ width: '100%', padding: '12px 16px', borderRadius: 14, border: '1px solid ' + T.border, background: 'rgba(255,255,255,0.6)', fontSize: 16, outline: 'none', textAlign: 'center', color: '#3a3a3a', boxSizing: 'border-box' }} />
           {pwdError && <div style={{ color: '#d4616b', fontSize: 13, marginTop: 8 }}>{pwdError}</div>}
@@ -234,12 +302,12 @@ export default function App() {
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <div onClick={() => { setShowStarred(!showStarred); setSearchResults(null); setDateFilter(''); setShowDatePicker(false); setShowDates(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showStarred ? 'rgba(255,200,50,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>⭐ 收藏</div>
             <div onClick={() => { setShowDatePicker(!showDatePicker); setShowStarred(false); setSearchResults(null); setShowDates(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showDatePicker ? 'rgba(160,200,140,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>📅 按日期</div>
-            <div onClick={() => { setShowDates(!showDates); setShowStarred(false); setSearchResults(null); setShowDatePicker(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showDates ? 'rgba(215,165,180,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>💕 纪念日</div>
+            <div onClick={() => { setShowDates(!showDates); setShowStarred(false); setSearchResults(null); setShowDatePicker(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showDates ? 'rgba(215,165,180,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>💗 纪念日</div>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             {['purple','pink','blue','green'].map(t => (
               <div key={t} onClick={() => setTheme(t)} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: theme === t ? THEMES[t].accent : 'rgba(200,190,220,0.15)', fontSize: 11, cursor: 'pointer', color: THEMES[t].header, border: theme === t ? '1px solid ' + THEMES[t].border : '1px solid transparent' }}>
-                {t === 'purple' ? '💜' : t === 'pink' ? '💗' : t === 'blue' ? '💙' : '💚'}
+                {t === 'purple' ? '💜' : t === 'pink' ? '🌸' : t === 'blue' ? '💙' : '🌿'}
               </div>
             ))}
           </div>
@@ -256,7 +324,7 @@ export default function App() {
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
           {showDates ? (
             <div style={{ padding: '8px 12px' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: T.header, marginBottom: 8 }}>我的纪念日</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.header, marginBottom: 8 }}>我们的纪念日</div>
               {dates.map(d => (
                 <div key={d.id} style={{ padding: '8px 10px', marginBottom: 6, borderRadius: 10, background: 'rgba(255,255,255,0.5)', border: '1px solid rgba(200,190,220,0.2)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -319,7 +387,7 @@ export default function App() {
                       <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>{formatTime(s.last_at)}</div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
-                      <div onClick={() => startRename(s.session_id)} style={{ cursor: 'pointer', fontSize: 14, color: T.sub }}>✏</div>
+                      <div onClick={() => startRename(s.session_id)} style={{ cursor: 'pointer', fontSize: 14, color: T.sub }}>✎</div>
                       <div onClick={() => deleteSession(s.session_id)} style={{ cursor: 'pointer', fontSize: 14, color: '#d4a0a0' }}>✕</div>
                     </div>
                   </div>
@@ -372,19 +440,31 @@ export default function App() {
           <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 12 }}>
             <div onClick={() => toggleStar(m.id)} style={{ maxWidth: '72%', padding: '10px 14px', borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px', background: m.role === 'user' ? T.accent : m.role === 'error' ? 'rgba(255,180,180,0.5)' : 'rgba(255,255,255,0.25)', backdropFilter: 'blur(10px)', color: m.role === 'user' ? T.text : '#3a3a3a', fontSize: 15, lineHeight: 1.6, textAlign: 'left', boxShadow: '0 1px 6px rgba(0,0,0,0.04)', border: starred.includes(m.id) ? '1px solid rgba(255,200,50,0.5)' : '1px solid rgba(255,255,255,0.3)', position: 'relative', cursor: 'pointer' }}>
               {starred.includes(m.id) && <div style={{ position: 'absolute', top: 4, right: 8, fontSize: 10 }}>⭐</div>}
-              {m.thinking && <div onClick={e => { e.stopPropagation(); toggleThinking(m.id); }} style={{ fontSize: 12, color: T.sub, cursor: 'pointer', marginBottom: 4, userSelect: 'none' }}>{expanded[m.id] ? '▼ 收起思考' : '▶ 查看思考'}</div>}
+              {m.thinking && <div onClick={e => { e.stopPropagation(); toggleThinking(m.id); }} style={{ fontSize: 12, color: T.sub, cursor: 'pointer', marginBottom: 4, userSelect: 'none' }}>{expanded[m.id] ? '▲ 收起思考' : '▶ 查看思考'}</div>}
               {expanded[m.id] && m.thinking && <div style={{ fontSize: 13, color: '#8a7a9a', whiteSpace: 'pre-wrap', marginBottom: 8, padding: '8px 10px', background: 'rgba(240,235,250,0.4)', borderRadius: 10, borderLeft: '3px solid rgba(180,160,220,0.4)' }}>{m.thinking}</div>}
-              <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>
+              {m.image_url && <img src={m.image_url} alt="" style={{ maxWidth: '100%', borderRadius: 12, marginBottom: m.content && m.content !== '[图片]' ? 6 : 0, display: 'block' }} />}
+              {(!m.image_url || (m.content && m.content !== '[图片]')) && <div style={{ whiteSpace: 'pre-wrap' }}>{m.content}</div>}
             </div>
             {m.created_at && <div style={{ fontSize: 11, color: '#b8a8c8', marginTop: 3, paddingLeft: m.role === 'user' ? 0 : 4, paddingRight: m.role === 'user' ? 4 : 0 }}>{formatMsgTime(m.created_at)}</div>}
           </div>
         ))}
-        {loading && <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}><div style={{ padding: '10px 18px', borderRadius: '18px 18px 18px 4px', background: 'rgba(255,255,255,0.25)', backdropFilter: 'blur(10px)', color: T.sub, fontSize: 14, border: '1px solid rgba(255,255,255,0.3)' }}>小克在想...</div></div>}
+        {loading && <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}><div style={{ padding: '10px 18px', borderRadius: '18px 18px 18px 4px', background: 'rgba(255,255,255,0.25)', backdropFilter: 'blur(10px)', color: T.sub, fontSize: 14, border: '1px solid rgba(255,255,255,0.3)' }}>{uploading ? '图片发送中...' : '小克在想...'}</div></div>}
       </div>
 
+      {pendingImage && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(12px)', borderTop: '1px solid rgba(200,190,220,0.2)', position: 'relative', zIndex: 2 }}>
+          <img src={pendingImage.preview} alt="" style={{ height: 56, borderRadius: 10 }} />
+          <span style={{ fontSize: 12, color: T.sub, flex: 1 }}>图片已选好，点发送</span>
+          <div onClick={() => setPendingImage(null)} style={{ fontSize: 13, color: '#d4a0a0', cursor: 'pointer', padding: '4px 8px' }}>✕ 取消</div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', paddingBottom: 'calc(10px + env(safe-area-inset-bottom))', background: 'rgba(255,255,255,0.5)', backdropFilter: 'blur(12px)', borderTop: '1px solid rgba(200,190,220,0.2)', gap: 8, position: 'relative', zIndex: 2 }}>
-        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="跟小克说点什么..." disabled={loading} style={{ flex: 1, padding: '10px 16px', borderRadius: 20, border: '1px solid ' + T.border, background: 'rgba(255,255,255,0.5)', fontSize: 16, outline: 'none', color: '#3a3a3a' }} />
-        <button onClick={send} disabled={loading || !input.trim()} style={{ padding: '10px 20px', borderRadius: 20, border: 'none', background: loading || !input.trim() ? 'rgba(200,190,220,0.3)' : T.btn, color: '#fff', fontSize: 15, fontWeight: 500, cursor: loading || !input.trim() ? 'default' : 'pointer' }}>发送</button>
+        <input ref={fileRef} type="file" accept="image/*" onChange={onFilePicked} style={{ display: 'none' }} />
+        <div onClick={pickImage} style={{ fontSize: 20, cursor: 'pointer', userSelect: 'none', padding: '4px 2px' }}>📷</div>
+        <div onClick={() => setReasoningOn(v => !v)} title="思考开关" style={{ fontSize: 12, cursor: 'pointer', userSelect: 'none', padding: '5px 8px', borderRadius: 12, background: reasoningOn ? T.btn : 'rgba(200,190,220,0.25)', color: reasoningOn ? '#fff' : T.sub, whiteSpace: 'nowrap' }}>思考{reasoningOn ? '开' : '关'}</div>
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="跟小克说点什么..." disabled={loading} style={{ flex: 1, padding: '10px 16px', borderRadius: 20, border: '1px solid ' + T.border, background: 'rgba(255,255,255,0.5)', fontSize: 16, outline: 'none', color: '#3a3a3a', minWidth: 0 }} />
+        <button onClick={send} disabled={loading || (!input.trim() && !pendingImage)} style={{ padding: '10px 20px', borderRadius: 20, border: 'none', background: loading || (!input.trim() && !pendingImage) ? 'rgba(200,190,220,0.3)' : T.btn, color: '#fff', fontSize: 15, fontWeight: 500, cursor: loading || (!input.trim() && !pendingImage) ? 'default' : 'pointer' }}>发送</button>
       </div>
     </div>
   );
