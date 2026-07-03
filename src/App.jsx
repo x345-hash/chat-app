@@ -122,7 +122,10 @@ export default function App() {
         const r = await authedFetch(API + '/api/messages?session_id=' + sid);
         if (r.status === 401) { setAuthed(false); return; }
         if (!r.ok) throw new Error('load ' + r.status);
-        setMessages(await r.json());
+        const msgs = await r.json();
+        setMessages(msgs);
+        const dbStarred = msgs.filter(m => m.starred).map(m => m.id);
+        if (dbStarred.length > 0) setStarred(prev => [...new Set([...prev, ...dbStarred])]);
         return;
       } catch (err) { lastErr = err; console.error('loadMessages retry', i + 1, err); await sleep(1500 * (i + 1)); }
     }
@@ -246,7 +249,11 @@ export default function App() {
   function toggleThinking(id) { setExpanded(e => ({ ...e, [id]: !e[id] })); }
   function formatTime(t) { try { return new Date(t).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return t; } }
   function displayName(id) { if (sessionNames[id]) return sessionNames[id]; if (id === 'default') return '默认对话'; return id; }
-  function toggleStar(msgId) { setStarred(p => p.includes(msgId) ? p.filter(i => i !== msgId) : [...p, msgId]); }
+  function toggleStar(msgId) {
+    const isStarred = starred.includes(msgId);
+    setStarred(p => isStarred ? p.filter(i => i !== msgId) : [...p, msgId]);
+    authedFetch(API + '/api/messages/' + msgId + '/star', { method: 'PATCH', body: JSON.stringify({ starred: !isStarred }) }).catch(err => console.error('star error:', err));
+  }
 
   function exportChat() {
     if (!messages.length) return;
@@ -261,7 +268,13 @@ export default function App() {
   function removeDate(id) { setDates(p => p.filter(d => d.id !== id)); }
 
   const filteredMessages = dateFilter ? messages.filter(m => m.created_at && new Date(m.created_at).toLocaleDateString('en-CA') === dateFilter) : messages;
-  const starredMessages = messages.filter(m => starred.includes(m.id));
+  const [starredMessages, setStarredMessages] = useState([]);
+  async function loadStarredMessages() {
+    try {
+      const r = await authedFetch(API + '/api/messages/starred');
+      if (r.ok) setStarredMessages(await r.json());
+    } catch (err) { console.error('load starred error:', err); }
+  }
   const currentModelLabel = selectedModel ? (MODEL_OPTIONS.find(m => m.value === selectedModel)?.label || selectedModel.split('/').pop()) : '默认';
 
   if (!authed) {
@@ -300,7 +313,7 @@ export default function App() {
             <div onClick={doSearch} style={{ padding: '6px 10px', borderRadius: 10, background: T.btn, color: '#fff', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>搜</div>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            <div onClick={() => { setShowStarred(!showStarred); setSearchResults(null); setDateFilter(''); setShowDatePicker(false); setShowDates(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showStarred ? 'rgba(255,200,50,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>⭐ 收藏</div>
+            <div onClick={() => { if (!showStarred) loadStarredMessages(); setShowStarred(!showStarred); setSearchResults(null); setDateFilter(''); setShowDatePicker(false); setShowDates(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showStarred ? 'rgba(255,200,50,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>⭐ 收藏</div>
             <div onClick={() => { setShowDatePicker(!showDatePicker); setShowStarred(false); setSearchResults(null); setShowDates(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showDatePicker ? 'rgba(160,200,140,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>📅 按日期</div>
             <div onClick={() => { setShowDates(!showDates); setShowStarred(false); setSearchResults(null); setShowDatePicker(false); }} style={{ flex: 1, padding: '5px 0', borderRadius: 8, textAlign: 'center', background: showDates ? 'rgba(215,165,180,0.3)' : 'rgba(200,190,220,0.2)', color: T.header, fontSize: 12, cursor: 'pointer' }}>💗 纪念日</div>
           </div>
