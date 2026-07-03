@@ -141,16 +141,22 @@ export default function App() {
         const lastVisit = localStorage.getItem('last_visit') || '';
         const today = new Date().toDateString();
         const weatherShownDate = localStorage.getItem('weather_shown_date') || '';
-        const showWeather = weatherShownDate !== today;
-        if (!showWeather && localStorage.getItem('greeting_shown_date') === today) return;
-        localStorage.setItem('greeting_shown_date', today);
+        const isFirstToday = weatherShownDate !== today;
+        const lastWeatherDesc = isFirstToday ? '' : (localStorage.getItem('last_weather_desc') || '');
         let city = 'Changsha';
         try { const g = await fetch('https://ipapi.co/json/'); if (g.ok) { const d = await g.json(); if (d.city) city = d.city; } } catch {}
-        const r = await authedFetch(API + '/api/greeting', { method: 'POST', body: JSON.stringify({ last_visit: lastVisit || null, city, show_weather: showWeather, session_id: sessionId }) });
+        const r = await authedFetch(API + '/api/greeting', { method: 'POST', body: JSON.stringify({ last_visit: lastVisit || null, city, last_weather_desc: lastWeatherDesc, session_id: sessionId }) });
         if (r.ok) {
           const data = await r.json();
-          if (data.greeting) setGreetingMsg({ id: 'greeting-' + Date.now(), role: 'assistant', content: data.greeting, created_at: new Date().toISOString() });
-          if (showWeather) localStorage.setItem('weather_shown_date', today);
+          if (data.greeting) {
+            const greetingObj = { id: 'greeting-' + Date.now(), role: 'assistant', content: data.greeting, created_at: new Date().toISOString() };
+            setGreetingMsg(greetingObj);
+            setMessages(m => [...m, greetingObj]);
+          }
+          if (data.weather && data.weather.desc) {
+            localStorage.setItem('last_weather_desc', data.weather.desc);
+            localStorage.setItem('weather_shown_date', today);
+          }
         }
       } catch (err) { console.error(err); }
       localStorage.setItem('last_visit', new Date().toISOString());
