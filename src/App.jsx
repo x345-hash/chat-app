@@ -139,6 +139,13 @@ export default function App() {
     async function fetchGreeting() {
       try {
         const lastVisit = localStorage.getItem('last_visit') || '';
+        if (lastVisit) {
+          const diffMin = Math.floor((Date.now() - new Date(lastVisit).getTime()) / 60000);
+          if (diffMin < 60) {
+            localStorage.setItem('last_visit', new Date().toISOString());
+            return;
+          }
+        }
         const today = new Date().toDateString();
         const weatherShownDate = localStorage.getItem('weather_shown_date') || '';
         const isFirstToday = weatherShownDate !== today;
